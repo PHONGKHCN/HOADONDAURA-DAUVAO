@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Hóa đơn {{ invoice.so_hd or invoice.id }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <a href="{{ url_for('sales_list') }}" class="btn btn-outline-secondary btn-sm">← Danh sách</a>
+  <a href="{{ url_for('sales_pdf', invoice_id=invoice.id) }}" class="btn btn-primary btn-sm">⬇ Tải PDF</a>
+</div>
+
+<div class="card p-4">
+  <div class="text-center mb-3">
+    <h5 class="fw-bold mb-1">{{ invoice.seller_name }}</h5>
+    {% if invoice.seller_address %}<div>Địa chỉ: {{ invoice.seller_address }}</div>{% endif %}
+    {% if invoice.seller_phone %}<div>Điện thoại: {{ invoice.seller_phone }}</div>{% endif %}
+    <h4 class="fw-bold mt-3">HÓA ĐƠN BÁN HÀNG</h4>
+    {% if invoice.so_hd %}<div>Số: {{ invoice.so_hd }}</div>{% endif %}
+  </div>
+
+  <div class="mb-3">
+    <div><strong>Khách hàng:</strong> {{ invoice.buyer_name }}</div>
+    {% if invoice.buyer_address %}<div><strong>Địa chỉ:</strong> {{ invoice.buyer_address }}</div>{% endif %}
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-bordered">
+      <thead>
+        <tr class="text-center">
+          <th>STT</th><th>Tên hàng</th><th>Quy cách</th><th>ĐVT</th>
+          <th>SL</th><th>Đơn giá</th><th>Thành tiền</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td class="text-center">{{ it.stt }}</td>
+          <td>{{ it.ten_hang }}</td>
+          <td>{{ it.quy_cach }}</td>
+          <td class="text-center">{{ it.dvt }}</td>
+          <td class="text-center">{{ it.so_luong | int if it.so_luong == it.so_luong|int else it.so_luong }}</td>
+          <td class="text-end">{{ "{:,.0f}".format(it.don_gia) }}</td>
+          <td class="text-end">{{ "{:,.0f}".format(it.thanh_tien) }}</td>
+        </tr>
+        {% endfor %}
+        <tr class="table-light fw-bold">
+          <td colspan="6" class="text-end">TỔNG CỘNG</td>
+          <td class="text-end">{{ "{:,.0f}".format(invoice.tong_cong) }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="mb-4"><em>Thành tiền (bằng chữ): {{ so_tien_chu }}</em></div>
+  <div class="text-end mb-4">Ngày {{ invoice.ngay_lap[8:10] }} tháng {{ invoice.ngay_lap[5:7] }} năm {{ invoice.ngay_lap[0:4] }}</div>
+
+  <div class="row text-center">
+    <div class="col-6">
+      <strong>Khách hàng</strong><br><em class="text-muted">(Ký, ghi rõ họ tên)</em>
+    </div>
+    <div class="col-6">
+      <strong>Người bán</strong><br><em class="text-muted">(Ký, ghi rõ họ tên)</em>
+    </div>
+  </div>
+</div>
+{% endblock %}

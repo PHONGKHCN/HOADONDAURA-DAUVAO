@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Tạo hóa đơn bán hàng{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Tạo hóa đơn bán hàng</h4>
+  <a href="{{ url_for('sales_list') }}" class="btn btn-outline-secondary btn-sm">← Danh sách</a>
+</div>
+
+<form method="post">
+  <div class="card p-3 mb-3">
+    <h6 class="text-muted">Thông tin bên bán</h6>
+    <div class="row g-2">
+      <div class="col-md-6">
+        <label class="form-label">Tên cửa hàng / đơn vị bán *</label>
+        <input type="text" name="seller_name" class="form-control" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Điện thoại</label>
+        <input type="text" name="seller_phone" class="form-control">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Số HĐ (nếu có)</label>
+        <input type="text" name="so_hd" class="form-control">
+      </div>
+      <div class="col-md-8">
+        <label class="form-label">Địa chỉ</label>
+        <input type="text" name="seller_address" class="form-control">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Ngày lập *</label>
+        <input type="date" name="ngay_lap" class="form-control" value="{{ today }}" required>
+      </div>
+    </div>
+  </div>
+
+  <div class="card p-3 mb-3">
+    <h6 class="text-muted">Thông tin khách hàng</h6>
+    <div class="row g-2">
+      <div class="col-md-6">
+        <label class="form-label">Tên khách hàng *</label>
+        <input type="text" name="buyer_name" class="form-control" required>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Địa chỉ</label>
+        <input type="text" name="buyer_address" class="form-control">
+      </div>
+    </div>
+  </div>
+
+  <div class="card p-3 mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h6 class="text-muted mb-0">Mặt hàng</h6>
+      <button type="button" class="btn btn-sm btn-primary" onclick="addRow()">+ Thêm dòng</button>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle" id="itemsTable">
+        <thead>
+          <tr>
+            <th style="width:5%">STT</th>
+            <th style="width:26%">Tên hàng</th>
+            <th style="width:16%">Quy cách</th>
+            <th style="width:10%">ĐVT</th>
+            <th style="width:10%">SL</th>
+            <th style="width:14%">Đơn giá</th>
+            <th style="width:14%">Thành tiền</th>
+            <th style="width:5%"></th>
+          </tr>
+        </thead>
+        <tbody id="itemsBody"></tbody>
+      </table>
+    </div>
+    <div class="text-end">
+      <strong>Tổng cộng: <span id="tongCong">0</span> đ</strong>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-success">Lưu hóa đơn</button>
+</form>
+
+<script>
+let rowCount = 0;
+
+function addRow() {
+  rowCount++;
+  const tbody = document.getElementById("itemsBody");
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td class="text-center stt">${rowCount}</td>
+    <td><input type="text" name="ten_hang[]" class="form-control form-control-sm"></td>
+    <td><input type="text" name="quy_cach[]" class="form-control form-control-sm"></td>
+    <td><input type="text" name="dvt[]" class="form-control form-control-sm"></td>
+    <td><input type="number" step="any" name="so_luong[]" class="form-control form-control-sm sl" value="0"></td>
+    <td><input type="number" step="any" name="don_gia[]" class="form-control form-control-sm dg" value="0"></td>
+    <td class="text-end thanh-tien">0</td>
+    <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRow(this)">✕</button></td>
+  `;
+  tbody.appendChild(tr);
+  tr.querySelectorAll(".sl, .dg").forEach(inp => inp.addEventListener("input", recalc));
+  recalc();
+}
+
+function removeRow(btn) {
+  btn.closest("tr").remove();
+  renumber();
+  recalc();
+}
+
+function renumber() {
+  document.querySelectorAll("#itemsBody tr").forEach((tr, i) => {
+    tr.querySelector(".stt").textContent = i + 1;
+  });
+  rowCount = document.querySelectorAll("#itemsBody tr").length;
+}
+
+function recalc() {
+  let tong = 0;
+  document.querySelectorAll("#itemsBody tr").forEach(tr => {
+    const sl = parseFloat(tr.querySelector(".sl").value) || 0;
+    const dg = parseFloat(tr.querySelector(".dg").value) || 0;
+    const tt = sl * dg;
+    tr.querySelector(".thanh-tien").textContent = tt.toLocaleString("vi-VN");
+    tong += tt;
+  });
+  document.getElementById("tongCong").textContent = tong.toLocaleString("vi-VN");
+}
+
+// Start with 2 empty rows
+addRow();
+addRow();
+</script>
+{% endblock %}

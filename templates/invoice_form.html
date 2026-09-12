@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ "Sửa" if invoice else "Thêm" }} hóa đơn{% endblock %}
+{% block content %}
+<h4 class="mb-3">{{ "Sửa hóa đơn" if invoice else "Thêm hóa đơn (bảng kê thuế)" }}</h4>
+
+<form method="post" class="card p-4">
+  <div class="row g-2">
+    <div class="col-md-3">
+      <label class="form-label">Loại *</label>
+      <select name="loai" class="form-select" required>
+        <option value="dau_ra" {{ "selected" if invoice and invoice.loai=="dau_ra" }}>Đầu ra (bán ra)</option>
+        <option value="dau_vao" {{ "selected" if invoice and invoice.loai=="dau_vao" }}>Đầu vào (mua vào)</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Ký hiệu HĐ</label>
+      <input type="text" name="ky_hieu" class="form-control" value="{{ invoice.ky_hieu if invoice else '' }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Số HĐ *</label>
+      <input type="text" name="so_hd" class="form-control" required value="{{ invoice.so_hd if invoice else '' }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Ngày lập *</label>
+      <input type="date" name="ngay_lap" class="form-control" required value="{{ invoice.ngay_lap if invoice else '' }}">
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">Tên đối tác *</label>
+      <input type="text" name="doi_tac" class="form-control" required value="{{ invoice.doi_tac if invoice else '' }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Mã số thuế</label>
+      <input type="text" name="mst" class="form-control" value="{{ invoice.mst if invoice else '' }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Thuế suất (%) *</label>
+      <input type="number" step="any" name="thue_suat" class="form-control" required value="{{ invoice.thue_suat if invoice else 10 }}">
+    </div>
+
+    <div class="col-md-12">
+      <label class="form-label">Mặt hàng/Dịch vụ</label>
+      <input type="text" name="mat_hang" class="form-control" value="{{ invoice.mat_hang if invoice else '' }}">
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label">Doanh số chưa thuế (đ) *</label>
+      <input type="number" step="any" name="doanh_so" id="doanhSo" class="form-control" required value="{{ invoice.doanh_so if invoice else 0 }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Ghi chú</label>
+      <input type="text" name="ghi_chu" class="form-control" value="{{ invoice.ghi_chu if invoice else '' }}">
+    </div>
+  </div>
+
+  <div class="mt-3">
+    <button type="submit" class="btn btn-success">Lưu</button>
+    <a href="{{ url_for('invoice_list') }}" class="btn btn-outline-secondary">Hủy</a>
+  </div>
+</form>
+{% endblock %}

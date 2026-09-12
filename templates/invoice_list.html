@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Bảng kê hóa đơn{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Bảng kê hóa đơn (thuế GTGT)</h4>
+  <a href="{{ url_for('invoice_new') }}" class="btn btn-primary btn-sm">+ Thêm hóa đơn</a>
+</div>
+
+<form class="row g-2 mb-3" method="get">
+  <div class="col-auto">
+    <select name="loai" class="form-select form-select-sm">
+      <option value="" {{ "selected" if not loai }}>Tất cả loại</option>
+      <option value="dau_ra" {{ "selected" if loai=="dau_ra" }}>Đầu ra</option>
+      <option value="dau_vao" {{ "selected" if loai=="dau_vao" }}>Đầu vào</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <input type="month" name="period" value="{{ period }}" class="form-control form-control-sm">
+  </div>
+  <div class="col-auto">
+    <input type="text" name="q" value="{{ q }}" placeholder="Tìm đối tác/số HĐ/MST" class="form-control form-control-sm">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-sm btn-outline-primary">Lọc</button>
+  </div>
+</form>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Loại</th><th>Ngày</th><th>Số HĐ</th><th>Đối tác</th><th>MST</th>
+          <th class="text-end">Doanh số</th><th class="text-end">Thuế</th><th class="text-end">Tổng</th>
+          <th class="text-center">Thao tác</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for inv in invoices %}
+        <tr>
+          <td><span class="badge {{ 'badge-out' if inv.loai=='dau_ra' else 'badge-in' }}">{{ "Đầu ra" if inv.loai=="dau_ra" else "Đầu vào" }}</span></td>
+          <td>{{ inv.ngay_lap }}</td>
+          <td>{{ inv.ky_hieu }}{{ inv.so_hd }}</td>
+          <td>{{ inv.doi_tac }}</td>
+          <td>{{ inv.mst }}</td>
+          <td class="text-end">{{ "{:,.0f}".format(inv.doanh_so) }}</td>
+          <td class="text-end">{{ "{:,.0f}".format(inv.tien_thue) }}</td>
+          <td class="text-end">{{ "{:,.0f}".format(inv.tong_cong) }}</td>
+          <td class="text-center">
+            <a href="{{ url_for('invoice_edit', invoice_id=inv.id) }}" class="btn btn-sm btn-outline-secondary">Sửa</a>
+            <form method="post" action="{{ url_for('invoice_delete', invoice_id=inv.id) }}" class="d-inline"
+                  onsubmit="return confirm('Xóa hóa đơn này?');">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Xóa</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="text-center text-muted py-4">Không có dữ liệu.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

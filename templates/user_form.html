@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Thêm tài khoản{% endblock %}
+{% block content %}
+<h4 class="mb-3">Thêm tài khoản</h4>
+<form method="post" class="card p-4" style="max-width:480px;">
+  <div class="mb-3">
+    <label class="form-label">Tên đăng nhập *</label>
+    <input type="text" name="username" class="form-control" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Mật khẩu *</label>
+    <input type="password" name="password" class="form-control" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Họ tên</label>
+    <input type="text" name="full_name" class="form-control">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Vai trò</label>
+    <select name="role" class="form-select">
+      <option value="staff">Nhân viên</option>
+      <option value="admin">Admin</option>
+    </select>
+  </div>
+  <button type="submit" class="btn btn-success">Tạo tài khoản</button>
+  <a href="{{ url_for('user_list') }}" class="btn btn-outline-secondary">Hủy</a>
+</form>
+{% endblock %}
