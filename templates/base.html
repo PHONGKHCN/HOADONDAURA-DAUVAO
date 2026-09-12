@@ -34,6 +34,7 @@
         {% endif %}
       </ul>
       <span class="navbar-text text-light me-3">{{ current_user.full_name or current_user.username }} ({{ 'Admin' if current_user.is_admin else 'Nhân viên' }})</span>
+      <a href="{{ url_for('change_password') }}" class="btn btn-outline-light btn-sm me-2">Đổi mật khẩu</a>
       <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Đăng xuất</a>
     </div>
   </div>

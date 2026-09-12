@@ -672,6 +672,64 @@ def user_delete(user_id):
     return redirect(url_for("user_list"))
 
 
+@app.route("/account/change_password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    if request.method == "POST":
+        current_pw = request.form.get("current_password", "")
+        new_pw = request.form.get("new_password", "")
+        confirm_pw = request.form.get("confirm_password", "")
+
+        db = get_db()
+        row = db.execute("SELECT * FROM users WHERE id = ?", (current_user.id,)).fetchone()
+
+        if not check_password_hash(row["password_hash"], current_pw):
+            flash("Mật khẩu hiện tại không đúng.", "danger")
+        elif len(new_pw) < 4:
+            flash("Mật khẩu mới phải có ít nhất 4 ký tự.", "danger")
+        elif new_pw != confirm_pw:
+            flash("Mật khẩu mới nhập lại không khớp.", "danger")
+        else:
+            db.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (generate_password_hash(new_pw), current_user.id),
+            )
+            db.commit()
+            flash("Đã đổi mật khẩu thành công.", "success")
+            return redirect(url_for("dashboard"))
+
+    return render_template("change_password.html")
+
+
+@app.route("/users/<int:user_id>/reset_password", methods=["GET", "POST"])
+@login_required
+@admin_required
+def user_reset_password(user_id):
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        flash("Không tìm thấy tài khoản.", "danger")
+        return redirect(url_for("user_list"))
+
+    if request.method == "POST":
+        new_pw = request.form.get("new_password", "")
+        confirm_pw = request.form.get("confirm_password", "")
+        if len(new_pw) < 4:
+            flash("Mật khẩu mới phải có ít nhất 4 ký tự.", "danger")
+        elif new_pw != confirm_pw:
+            flash("Mật khẩu nhập lại không khớp.", "danger")
+        else:
+            db.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (generate_password_hash(new_pw), user_id),
+            )
+            db.commit()
+            flash(f"Đã đặt lại mật khẩu cho tài khoản \"{user['username']}\".", "success")
+            return redirect(url_for("user_list"))
+
+    return render_template("reset_password.html", user=user)
+
+
 # ---------- Danh mục đối tác (bên bán / bên mua đã lưu) ----------
 
 @app.route("/partners")
