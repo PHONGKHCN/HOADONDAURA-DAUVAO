@@ -8,14 +8,14 @@
 
 <div class="card p-4">
   <div class="alert alert-info small">
-    <strong>Cách dùng:</strong> Chuẩn bị trong Excel các cột theo đúng thứ tự sau (không cần đủ hết, tối thiểu 6 cột đầu),
+    <strong>Cách dùng:</strong> Chuẩn bị trong Excel các cột theo đúng thứ tự sau (không cần đủ hết, tối thiểu 4 cột đầu),
     rồi copy toàn bộ và dán vào ô bên dưới — mỗi dòng là 1 hóa đơn:
     <br>
-    <code>Loại | Ngày | Đối tác | MST | Mặt hàng | Doanh số chưa thuế | Thuế suất(%) | Số HĐ | Ký hiệu | Ghi chú</code>
+    <code>Loại | Ngày | Đối tác | Mặt hàng | Số tiền | Số HĐ | Ký hiệu | Ghi chú</code>
     <ul class="mb-0 mt-2">
       <li><strong>Loại</strong>: gõ "vào" hoặc "ra" (hoặc để trống và chọn Loại mặc định bên dưới nếu cả danh sách cùng 1 loại)</li>
       <li><strong>Ngày</strong>: định dạng <code>2026-01-15</code> hoặc <code>15/01/2026</code></li>
-      <li><strong>Thuế suất</strong>: nếu để trống sẽ mặc định 10%</li>
+      <li><strong>Số tiền</strong>: tổng tiền của hóa đơn (không tính thuế)</li>
     </ul>
   </div>
 
@@ -38,8 +38,8 @@
     <div class="mb-3">
       <label class="form-label">Dán danh sách hóa đơn từ Excel</label>
       <textarea name="bulk_text" class="form-control" rows="10" required
-                placeholder="vào&#9;2026-01-08&#9;Cong ty XYZ&#9;0300987654&#9;Vat tu van phong&#9;12000000&#9;10
-ra&#9;2026-01-10&#9;Chu Thanh Son&#9;&#9;Xi mang&#9;2912000&#9;10"></textarea>
+                placeholder="vào&#9;2026-01-08&#9;Cong ty XYZ&#9;Vat tu van phong&#9;12000000
+ra&#9;2026-01-10&#9;Chu Thanh Son&#9;Xi mang&#9;2912000"></textarea>
     </div>
 
     <button type="submit" class="btn btn-success">Tạo tất cả hóa đơn</button>

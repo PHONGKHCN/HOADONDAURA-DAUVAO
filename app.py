@@ -11,7 +11,7 @@ from flask_login import (
     login_required, current_user
 )
 from werkzeug.security import generate_password_hash, check_password_hash
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 from reportlab.lib.pagesizes import A4
@@ -135,6 +135,18 @@ def init_db():
             ghi_chu TEXT,
             created_at TEXT DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nhom TEXT,                    -- nhóm/khách hàng (để tách danh mục riêng cho từng khách)
+            ten TEXT NOT NULL,
+            quy_cach TEXT,
+            dvt TEXT,
+            gia_ban REAL DEFAULT 0,
+            gia_mua REAL DEFAULT 0,
+            ghi_chu TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
         """
     )
     db.commit()
@@ -251,7 +263,7 @@ def dashboard():
 
     dau_ra = totals("dau_ra")
     dau_vao = totals("dau_vao")
-    chenh_lech = dau_ra["tien_thue"] - dau_vao["tien_thue"]
+    chenh_lech = dau_ra["tong_cong"] - dau_vao["tong_cong"]
 
     return render_template(
         "dashboard.html",
@@ -278,8 +290,8 @@ def invoice_bulk():
         errors = []
         for idx, line in enumerate(lines, start=1):
             cols = [c.strip() for c in line.split("\t")]
-            if len(cols) < 6:
-                errors.append(f"Dòng {idx}: thiếu cột (cần ít nhất 6 cột)")
+            if len(cols) < 4:
+                errors.append(f"Dòng {idx}: thiếu cột (cần ít nhất 4 cột: Loại, Ngày, Đối tác, Số tiền)")
                 continue
             try:
                 loai_raw = cols[0].lower()
@@ -306,29 +318,24 @@ def invoice_bulk():
                     continue
 
                 doi_tac = cols[2]
-                mst = cols[3] if len(cols) > 3 else ""
-                mat_hang = cols[4] if len(cols) > 4 else ""
-                doanh_so_raw = cols[5] if len(cols) > 5 else "0"
-                doanh_so = float(re.sub(r"[^\d.\-]", "", doanh_so_raw.replace(",", "")) or 0)
-                thue_suat = float(cols[6]) if len(cols) > 6 and cols[6] else 10
-                so_hd = cols[7] if len(cols) > 7 else ""
-                ky_hieu = cols[8] if len(cols) > 8 else ""
-                ghi_chu = cols[9] if len(cols) > 9 else ""
+                mat_hang = cols[3] if len(cols) > 3 else ""
+                so_tien_raw = cols[4] if len(cols) > 4 else "0"
+                doanh_so = float(re.sub(r"[^\d.\-]", "", so_tien_raw.replace(",", "")) or 0)
+                so_hd = cols[5] if len(cols) > 5 else ""
+                ky_hieu = cols[6] if len(cols) > 6 else ""
+                ghi_chu = cols[7] if len(cols) > 7 else ""
 
                 if not doi_tac:
                     errors.append(f"Dòng {idx}: thiếu tên đối tác")
                     continue
-
-                tien_thue = round(doanh_so * thue_suat / 100, 0)
-                tong_cong = doanh_so + tien_thue
 
                 db.execute(
                     """INSERT INTO invoices
                        (loai, nhom, ky_hieu, so_hd, ngay_lap, doi_tac, mst, mat_hang,
                         doanh_so, thue_suat, tien_thue, tong_cong, ghi_chu, nguoi_tao_id)
                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (loai, default_nhom, ky_hieu, so_hd, ngay_lap, doi_tac, mst, mat_hang,
-                     doanh_so, thue_suat, tien_thue, tong_cong, ghi_chu, current_user.id),
+                    (loai, default_nhom, ky_hieu, so_hd, ngay_lap, doi_tac, "", mat_hang,
+                     doanh_so, 0, 0, doanh_so, ghi_chu, current_user.id),
                 )
                 created += 1
             except Exception as e:
@@ -367,9 +374,9 @@ def invoice_list():
         sql += " AND inv.ngay_lap >= ? AND inv.ngay_lap < ?"
         params += [start, end]
     if q:
-        sql += " AND (inv.doi_tac LIKE ? OR inv.so_hd LIKE ? OR inv.mst LIKE ?)"
+        sql += " AND (inv.doi_tac LIKE ? OR inv.so_hd LIKE ?)"
         like = f"%{q}%"
-        params += [like, like, like]
+        params += [like, like]
     sql += " ORDER BY inv.ngay_lap DESC, inv.id DESC"
 
     db = get_db()
@@ -385,9 +392,6 @@ def invoice_list():
 
 def parse_invoice_form(form):
     doanh_so = float(form.get("doanh_so") or 0)
-    thue_suat = float(form.get("thue_suat") or 0)
-    tien_thue = round(doanh_so * thue_suat / 100, 0)
-    tong_cong = doanh_so + tien_thue
     return {
         "loai": form.get("loai"),
         "nhom": form.get("nhom", "").strip(),
@@ -395,12 +399,8 @@ def parse_invoice_form(form):
         "so_hd": form.get("so_hd", "").strip(),
         "ngay_lap": form.get("ngay_lap"),
         "doi_tac": form.get("doi_tac", "").strip(),
-        "mst": form.get("mst", "").strip(),
         "mat_hang": form.get("mat_hang", "").strip(),
         "doanh_so": doanh_so,
-        "thue_suat": thue_suat,
-        "tien_thue": tien_thue,
-        "tong_cong": tong_cong,
         "ghi_chu": form.get("ghi_chu", "").strip(),
     }
 
@@ -418,9 +418,8 @@ def invoice_new():
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 data["loai"], data["nhom"], data["ky_hieu"], data["so_hd"], data["ngay_lap"],
-                data["doi_tac"], data["mst"], data["mat_hang"], data["doanh_so"],
-                data["thue_suat"], data["tien_thue"], data["tong_cong"],
-                data["ghi_chu"], current_user.id,
+                data["doi_tac"], "", data["mat_hang"], data["doanh_so"],
+                0, 0, data["doanh_so"], data["ghi_chu"], current_user.id,
             ),
         )
         db.commit()
@@ -442,12 +441,11 @@ def invoice_edit(invoice_id):
         data = parse_invoice_form(request.form)
         db.execute(
             """UPDATE invoices SET loai=?, nhom=?, ky_hieu=?, so_hd=?, ngay_lap=?, doi_tac=?,
-               mst=?, mat_hang=?, doanh_so=?, thue_suat=?, tien_thue=?, tong_cong=?, ghi_chu=?
+               mat_hang=?, doanh_so=?, tong_cong=?, ghi_chu=?
                WHERE id=?""",
             (
                 data["loai"], data["nhom"], data["ky_hieu"], data["so_hd"], data["ngay_lap"],
-                data["doi_tac"], data["mst"], data["mat_hang"], data["doanh_so"],
-                data["thue_suat"], data["tien_thue"], data["tong_cong"],
+                data["doi_tac"], data["mat_hang"], data["doanh_so"], data["doanh_so"],
                 data["ghi_chu"], invoice_id,
             ),
         )
@@ -468,7 +466,7 @@ def invoice_delete(invoice_id):
     return redirect(request.referrer or url_for("invoice_list"))
 
 
-# ---------- Excel export (theo mẫu bảng kê GTGT) ----------
+# ---------- Excel export (bảng kê đầu vào / đầu ra) ----------
 
 FONT_NAME = "Times New Roman"
 
@@ -484,16 +482,15 @@ def style_ledger_sheet(ws, title, period, rows):
     left = Alignment(horizontal="left", vertical="center", wrap_text=True)
     right = Alignment(horizontal="right", vertical="center")
 
-    headers = ["STT", "Ký hiệu HĐ", "Số HĐ", "Ngày lập", "Tên đối tác", "Mã số thuế",
-               "Mặt hàng/Dịch vụ", "Doanh số chưa thuế (đ)", "Thuế suất (%)",
-               "Tiền thuế GTGT (đ)", "Tổng cộng (đ)", "Ghi chú"]
-    widths = [5, 10, 8, 11, 22, 14, 22, 16, 10, 15, 16, 14]
+    headers = ["STT", "Ký hiệu HĐ", "Số HĐ", "Ngày lập", "Tên đối tác",
+               "Mặt hàng/Dịch vụ", "Số tiền (đ)", "Ghi chú"]
+    widths = [5, 10, 8, 11, 24, 26, 16, 20]
 
-    ws.merge_cells("A1:L1")
+    ws.merge_cells("A1:H1")
     ws["A1"] = title
     ws["A1"].font = title_font
     ws["A1"].alignment = center
-    ws.merge_cells("A2:L2")
+    ws.merge_cells("A2:H2")
     ws["A2"] = f"Kỳ: {period}"
     ws["A2"].font = sub_font
     ws["A2"].alignment = center
@@ -509,17 +506,16 @@ def style_ledger_sheet(ws, title, period, rows):
     r = hr + 1
     for idx, inv in enumerate(rows, start=1):
         values = [
-            idx, inv["ky_hieu"], inv["so_hd"], inv["ngay_lap"], inv["doi_tac"], inv["mst"],
-            inv["mat_hang"], inv["doanh_so"], inv["thue_suat"], inv["tien_thue"],
-            inv["tong_cong"], inv["ghi_chu"],
+            idx, inv["ky_hieu"], inv["so_hd"], inv["ngay_lap"], inv["doi_tac"],
+            inv["mat_hang"], inv["tong_cong"], inv["ghi_chu"],
         ]
         for i, val in enumerate(values):
             c = ws.cell(row=r, column=1 + i, value=val)
             c.border = border
             c.font = Font(name=FONT_NAME, size=10)
-            if i in (0, 1, 2, 3, 5, 8):
+            if i in (0, 1, 2, 3):
                 c.alignment = center
-            elif i in (7, 9, 10):
+            elif i == 6:
                 c.alignment = right
                 c.number_format = "#,##0"
             else:
@@ -530,23 +526,21 @@ def style_ledger_sheet(ws, title, period, rows):
         r += 1  # avoid SUM over header only
 
     total_row = r
-    ws.cell(row=total_row, column=7, value="TỔNG CỘNG").font = Font(name=FONT_NAME, bold=True, size=10)
-    ws.cell(row=total_row, column=7).alignment = Alignment(horizontal="right")
-    for col_letter, col_idx in [("H", 8), ("J", 10), ("K", 11)]:
-        cell = ws.cell(row=total_row, column=col_idx,
-                        value=f"=SUM({col_letter}{hr+1}:{col_letter}{total_row-1})")
-        cell.font = Font(name=FONT_NAME, bold=True, size=10)
-        cell.number_format = "#,##0"
-        cell.alignment = right
-    for col_idx in range(1, 13):
+    ws.cell(row=total_row, column=6, value="TỔNG CỘNG").font = Font(name=FONT_NAME, bold=True, size=10)
+    ws.cell(row=total_row, column=6).alignment = Alignment(horizontal="right")
+    cell = ws.cell(row=total_row, column=7, value=f"=SUM(G{hr+1}:G{total_row-1})")
+    cell.font = Font(name=FONT_NAME, bold=True, size=10)
+    cell.number_format = "#,##0"
+    cell.alignment = right
+    for col_idx in range(1, 9):
         ws.cell(row=total_row, column=col_idx).border = border
-        if col_idx not in (8, 10, 11):
+        if col_idx != 7:
             ws.cell(row=total_row, column=col_idx).fill = PatternFill(
                 start_color="D6E4F0", end_color="D6E4F0", fill_type="solid"
             )
 
     for i, w in enumerate(widths):
-        ws.column_dimensions[chr(65 + i) if i < 26 else "A"].width = w
+        ws.column_dimensions[chr(65 + i)].width = w
     ws.freeze_panes = "A5"
     return total_row
 
@@ -570,10 +564,10 @@ def export_excel():
     wb = Workbook()
     ws1 = wb.active
     ws1.title = "Đầu ra (Bán ra)"
-    r1 = style_ledger_sheet(ws1, "BẢNG KÊ HÓA ĐƠN GTGT - ĐẦU RA (BÁN RA)", period, dau_ra)
+    r1 = style_ledger_sheet(ws1, "BẢNG KÊ HÓA ĐƠN - ĐẦU RA (BÁN RA)", period, dau_ra)
 
     ws2 = wb.create_sheet("Đầu vào (Mua vào)")
-    r2 = style_ledger_sheet(ws2, "BẢNG KÊ HÓA ĐƠN GTGT - ĐẦU VÀO (MUA VÀO)", period, dau_vao)
+    r2 = style_ledger_sheet(ws2, "BẢNG KÊ HÓA ĐƠN - ĐẦU VÀO (MUA VÀO)", period, dau_vao)
 
     ws3 = wb.create_sheet("Đối chiếu")
     title_font = Font(name=FONT_NAME, bold=True, size=13)
@@ -585,16 +579,14 @@ def export_excel():
     left = Alignment(horizontal="left")
     right = Alignment(horizontal="right")
 
-    ws3.merge_cells("A1:D1")
-    ws3["A1"] = f"ĐỐI CHIẾU THUẾ GTGT ĐẦU VÀO - ĐẦU RA (Kỳ {period})"
+    ws3.merge_cells("A1:C1")
+    ws3["A1"] = f"ĐỐI CHIẾU ĐẦU VÀO - ĐẦU RA (Kỳ {period})"
     ws3["A1"].font = title_font
     ws3["A1"].alignment = center
 
     labels = [
-        ("Chỉ tiêu", "Đầu ra", "Đầu vào", "Chênh lệch"),
-        ("Tổng doanh số chưa thuế", f"='Đầu ra (Bán ra)'!H{r1}", f"='Đầu vào (Mua vào)'!H{r2}", "=B6-C6"),
-        ("Tổng tiền thuế GTGT", f"='Đầu ra (Bán ra)'!J{r1}", f"='Đầu vào (Mua vào)'!J{r2}", "=B7-C7"),
-        ("Tổng cộng (có thuế)", f"='Đầu ra (Bán ra)'!K{r1}", f"='Đầu vào (Mua vào)'!K{r2}", "=B8-C8"),
+        ("Chỉ tiêu", "Đầu ra", "Đầu vào"),
+        ("Tổng số tiền", f"='Đầu ra (Bán ra)'!G{r1}", f"='Đầu vào (Mua vào)'!G{r2}"),
     ]
     for i, row in enumerate(labels):
         for j, val in enumerate(row):
@@ -609,10 +601,16 @@ def export_excel():
                 c.alignment = left if j == 0 else right
                 if j > 0:
                     c.number_format = "#,##0"
-    ws3.merge_cells("A10:D10")
-    ws3["A10"] = "→ Chênh lệch dương: thuế GTGT phải nộp thêm | Chênh lệch âm: được khấu trừ/chuyển kỳ sau"
-    ws3["A10"].font = Font(name=FONT_NAME, italic=True, size=9)
-    for col, w in zip("ABCD", [28, 18, 18, 18]):
+    ws3.cell(row=7, column=1, value="Chênh lệch (Đầu ra - Đầu vào)").font = Font(name=FONT_NAME, size=10, bold=True)
+    ws3.cell(row=7, column=1).border = border
+    ws3.cell(row=7, column=1).alignment = left
+    diff_cell = ws3.cell(row=7, column=2, value="=B6-C6")
+    diff_cell.font = Font(name=FONT_NAME, size=10, bold=True)
+    diff_cell.number_format = "#,##0"
+    diff_cell.alignment = right
+    diff_cell.border = border
+    ws3.cell(row=7, column=3).border = border
+    for col, w in zip("ABC", [28, 18, 18]):
         ws3.column_dimensions[col].width = w
 
     buf = BytesIO()
@@ -746,6 +744,433 @@ def partner_delete(partner_id):
     return redirect(url_for("partner_list"))
 
 
+# ---------- Danh mục sản phẩm (dùng để chọn nhanh khi tạo hóa đơn) ----------
+
+@app.route("/products")
+@login_required
+def product_list():
+    nhom = request.args.get("nhom", "")
+    db = get_db()
+    sql = "SELECT * FROM products WHERE 1=1"
+    params = []
+    if nhom:
+        sql += " AND nhom = ?"
+        params.append(nhom)
+    sql += " ORDER BY nhom, ten"
+    products = db.execute(sql, params).fetchall()
+    nhoms = db.execute(
+        "SELECT DISTINCT nhom FROM products WHERE nhom IS NOT NULL AND nhom != '' ORDER BY nhom"
+    ).fetchall()
+    return render_template("product_list.html", products=products, nhoms=nhoms, nhom=nhom)
+
+
+@app.route("/products/new", methods=["GET", "POST"])
+@login_required
+def product_new():
+    if request.method == "POST":
+        f = request.form
+        db = get_db()
+        db.execute(
+            """INSERT INTO products (nhom, ten, quy_cach, dvt, gia_ban, gia_mua, ghi_chu)
+               VALUES (?,?,?,?,?,?,?)""",
+            (f.get("nhom", "").strip(), f.get("ten", "").strip(), f.get("quy_cach", "").strip(),
+             f.get("dvt", "").strip(), float(f.get("gia_ban") or 0), float(f.get("gia_mua") or 0),
+             f.get("ghi_chu", "").strip()),
+        )
+        db.commit()
+        flash("Đã lưu sản phẩm.", "success")
+        return redirect(url_for("product_list"))
+    return render_template("product_form.html", product=None)
+
+
+@app.route("/products/<int:product_id>/edit", methods=["GET", "POST"])
+@login_required
+def product_edit(product_id):
+    db = get_db()
+    product = db.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+    if not product:
+        flash("Không tìm thấy sản phẩm.", "danger")
+        return redirect(url_for("product_list"))
+    if request.method == "POST":
+        f = request.form
+        db.execute(
+            """UPDATE products SET nhom=?, ten=?, quy_cach=?, dvt=?, gia_ban=?, gia_mua=?, ghi_chu=?
+               WHERE id=?""",
+            (f.get("nhom", "").strip(), f.get("ten", "").strip(), f.get("quy_cach", "").strip(),
+             f.get("dvt", "").strip(), float(f.get("gia_ban") or 0), float(f.get("gia_mua") or 0),
+             f.get("ghi_chu", "").strip(), product_id),
+        )
+        db.commit()
+        flash("Đã cập nhật sản phẩm.", "success")
+        return redirect(url_for("product_list"))
+    return render_template("product_form.html", product=product)
+
+
+@app.route("/products/<int:product_id>/delete", methods=["POST"])
+@login_required
+def product_delete(product_id):
+    db = get_db()
+    db.execute("DELETE FROM products WHERE id=?", (product_id,))
+    db.commit()
+    flash("Đã xóa sản phẩm.", "success")
+    return redirect(url_for("product_list"))
+
+
+def extract_products_from_excel(file_stream):
+    """Đọc file Excel bất kỳ, tự tìm dòng tiêu đề và nhận diện cột theo từ khóa tiếng Việt.
+    Trả về list dict {ten, quy_cach, dvt, gia}."""
+    wb = load_workbook(file_stream, data_only=True)
+    results = []
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        header_row_idx = None
+        col_map = {}
+
+        # Quét tối đa 20 dòng đầu để tìm dòng tiêu đề (có ô chứa "tên" + "hàng")
+        for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=min(20, ws.max_row), values_only=True), start=1):
+            for col_idx, val in enumerate(row):
+                if not val or not isinstance(val, str):
+                    continue
+                low = val.lower()
+                if "tên" in low and ("hàng" in low or "sản phẩm" in low):
+                    header_row_idx = row_idx
+                    break
+            if header_row_idx:
+                header_values = list(ws.iter_rows(min_row=header_row_idx, max_row=header_row_idx, values_only=True))[0]
+                for col_idx, val in enumerate(header_values):
+                    if not val or not isinstance(val, str):
+                        continue
+                    low = val.lower()
+                    if "tên" in low and ("hàng" in low or "sản phẩm" in low):
+                        col_map["ten"] = col_idx
+                    elif "quy cách" in low:
+                        col_map["quy_cach"] = col_idx
+                    elif "đơn giá" in low or low.strip() == "giá":
+                        col_map["gia"] = col_idx
+                    elif "đơn vị" in low or "đvt" in low:
+                        col_map["dvt"] = col_idx
+                break
+
+        if not header_row_idx or "ten" not in col_map:
+            continue  # sheet này không phải danh mục sản phẩm, bỏ qua
+
+        for row in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
+            if col_map["ten"] >= len(row):
+                continue
+            ten = row[col_map["ten"]]
+            if not ten or not isinstance(ten, str):
+                continue
+            quy_cach = row[col_map["quy_cach"]] if "quy_cach" in col_map and col_map["quy_cach"] < len(row) else ""
+            dvt = row[col_map["dvt"]] if "dvt" in col_map and col_map["dvt"] < len(row) else ""
+            gia_raw = row[col_map["gia"]] if "gia" in col_map and col_map["gia"] < len(row) else 0
+            try:
+                gia = float(gia_raw) if gia_raw else 0
+            except (ValueError, TypeError):
+                gia = 0
+
+            # Bỏ qua các dòng "rác" như nhãn chữ ký/tổng cộng vô tình rơi đúng cột tên hàng
+            # (một dòng sản phẩm thật luôn có ít nhất 1 trong 3: quy cách/ĐVT/giá)
+            if not quy_cach and not dvt and not gia:
+                continue
+            if ten.strip().lower() in ("khách hàng", "người bán", "tổng cộng", "thành tiền", "ghi chú"):
+                continue
+
+            results.append({
+                "ten": str(ten).strip(),
+                "quy_cach": str(quy_cach).strip() if quy_cach else "",
+                "dvt": str(dvt).strip() if dvt else "",
+                "gia": gia,
+            })
+
+    return results
+
+
+@app.route("/products/import_excel", methods=["POST"])
+@login_required
+def product_import_excel():
+    default_nhom = request.form.get("default_nhom", "").strip()
+    loai_gia = request.form.get("loai_gia", "gia_ban")  # 'gia_ban' hoặc 'gia_mua'
+    try:
+        markup_percent = float(request.form.get("markup_percent") or 0)
+    except ValueError:
+        markup_percent = 0
+    file = request.files.get("excel_file")
+
+    if not file or not file.filename:
+        flash("Vui lòng chọn file Excel.", "danger")
+        return redirect(url_for("product_bulk"))
+
+    try:
+        rows = extract_products_from_excel(file.stream)
+    except Exception as e:
+        flash(f"Không đọc được file Excel: {e}", "danger")
+        return redirect(url_for("product_bulk"))
+
+    if not rows:
+        flash("Không tìm thấy cột 'Tên hàng hóa' trong file. Hãy đảm bảo file có dòng tiêu đề rõ ràng, "
+              "hoặc dùng cách dán thủ công bên dưới.", "danger")
+        return redirect(url_for("product_bulk"))
+
+    db = get_db()
+    created, updated = 0, 0
+    for r in rows:
+        # Nếu đang nhập giá mua và có đặt % lãi mong muốn, tự tính luôn giá bán tương ứng
+        auto_gia_ban = None
+        if loai_gia == "gia_mua" and markup_percent:
+            auto_gia_ban = round(r["gia"] * (1 + markup_percent / 100))
+
+        existing = db.execute(
+            "SELECT * FROM products WHERE ten = ? AND IFNULL(nhom,'') = ?",
+            (r["ten"], default_nhom),
+        ).fetchone()
+        if existing:
+            db.execute(f"UPDATE products SET {loai_gia} = ? WHERE id = ?", (r["gia"], existing["id"]))
+            if not existing["quy_cach"] and r["quy_cach"]:
+                db.execute("UPDATE products SET quy_cach = ? WHERE id = ?", (r["quy_cach"], existing["id"]))
+            if not existing["dvt"] and r["dvt"]:
+                db.execute("UPDATE products SET dvt = ? WHERE id = ?", (r["dvt"], existing["id"]))
+            # Chỉ tự điền giá bán nếu sản phẩm CHƯA có giá bán từ trước (không ghi đè giá đã nhập tay)
+            if auto_gia_ban is not None and not existing["gia_ban"]:
+                db.execute("UPDATE products SET gia_ban = ? WHERE id = ?", (auto_gia_ban, existing["id"]))
+            updated += 1
+        else:
+            gia_ban_val = auto_gia_ban if (loai_gia == "gia_mua" and auto_gia_ban is not None) else (r["gia"] if loai_gia == "gia_ban" else 0)
+            gia_mua_val = r["gia"] if loai_gia == "gia_mua" else 0
+            db.execute(
+                "INSERT INTO products (nhom, ten, quy_cach, dvt, gia_ban, gia_mua) VALUES (?,?,?,?,?,?)",
+                (default_nhom, r["ten"], r["quy_cach"], r["dvt"], gia_ban_val, gia_mua_val),
+            )
+            created += 1
+    db.commit()
+
+    msg = f"Đã thêm {created} sản phẩm mới, cập nhật {updated} sản phẩm đã có ({'giá bán' if loai_gia=='gia_ban' else 'giá mua'})."
+    if loai_gia == "gia_mua" and markup_percent:
+        msg += f" Đã tự tính giá bán = giá mua + {markup_percent:g}% cho các sản phẩm chưa có giá bán."
+    flash(msg, "success")
+    return redirect(url_for("product_list"))
+
+
+@app.route("/products/bulk", methods=["GET", "POST"])
+@login_required
+def product_bulk():
+    if request.method == "POST":
+        raw = request.form.get("bulk_text", "")
+        default_nhom = request.form.get("default_nhom", "").strip()
+        try:
+            markup_percent = float(request.form.get("markup_percent") or 0)
+        except ValueError:
+            markup_percent = 0
+        lines = [l for l in raw.replace("\r\n", "\n").split("\n") if l.strip()]
+
+        db = get_db()
+        created = 0
+        errors = []
+        for idx, line in enumerate(lines, start=1):
+            cols = [c.strip() for c in line.split("\t")]
+            if not cols or not cols[0]:
+                errors.append(f"Dòng {idx}: thiếu tên hàng")
+                continue
+            try:
+                ten = cols[0]
+                quy_cach = cols[1] if len(cols) > 1 else ""
+                dvt = cols[2] if len(cols) > 2 else ""
+                gia_ban = float(re.sub(r"[^\d.\-]", "", (cols[3] if len(cols) > 3 else "0").replace(",", "")) or 0)
+                gia_mua = float(re.sub(r"[^\d.\-]", "", (cols[4] if len(cols) > 4 else "0").replace(",", "")) or 0)
+                ghi_chu = cols[5] if len(cols) > 5 else ""
+
+                # Chưa có giá bán nhưng có giá mua + đặt % lãi -> tự tính giá bán
+                if not gia_ban and gia_mua and markup_percent:
+                    gia_ban = round(gia_mua * (1 + markup_percent / 100))
+
+                db.execute(
+                    """INSERT INTO products (nhom, ten, quy_cach, dvt, gia_ban, gia_mua, ghi_chu)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (default_nhom, ten, quy_cach, dvt, gia_ban, gia_mua, ghi_chu),
+                )
+                created += 1
+            except Exception as e:
+                errors.append(f"Dòng {idx}: lỗi xử lý ({e})")
+
+        db.commit()
+        if created:
+            flash(f"Đã thêm {created} sản phẩm vào danh mục.", "success")
+        if errors:
+            flash("Một số dòng bị bỏ qua: " + " | ".join(errors[:10]) +
+                  (f" (và {len(errors)-10} lỗi khác)" if len(errors) > 10 else ""), "danger")
+        return redirect(url_for("product_list"))
+
+    return render_template("product_bulk.html")
+
+
+# ---------- Nhập hàng loạt đối tác (từ file Excel hoặc dán tay) ----------
+
+def extract_partners_from_excel(file_stream):
+    """Đọc file Excel bất kỳ, tự tìm cột Khách hàng/Đối tác/Nhà cung cấp + Địa chỉ/SĐT/MST.
+    Xử lý luôn trường hợp tên và địa chỉ gộp chung 1 ô nhiều dòng kiểu
+    'Khách hàng: Tên\\nĐịa chỉ: ...' như trong file mẫu VLXD."""
+    wb = load_workbook(file_stream, data_only=True)
+    results = []
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        header_row_idx = None
+        col_map = {}
+
+        for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=min(20, ws.max_row), values_only=True), start=1):
+            for val in row:
+                if not val or not isinstance(val, str):
+                    continue
+                low = val.lower()
+                if "khách hàng" in low or "đối tác" in low or "nhà cung cấp" in low or low.strip() == "tên":
+                    header_row_idx = row_idx
+                    break
+            if header_row_idx:
+                header_values = list(ws.iter_rows(min_row=header_row_idx, max_row=header_row_idx, values_only=True))[0]
+                for col_idx, val in enumerate(header_values):
+                    if not val or not isinstance(val, str):
+                        continue
+                    low = val.lower()
+                    if "khách hàng" in low or "đối tác" in low or "nhà cung cấp" in low or low.strip() == "tên":
+                        col_map["ten"] = col_idx
+                    elif "địa chỉ" in low:
+                        col_map["dia_chi"] = col_idx
+                    elif "điện thoại" in low or "sđt" in low or "sdt" in low:
+                        col_map["sdt"] = col_idx
+                    elif "mã số thuế" in low or "mst" in low:
+                        col_map["mst"] = col_idx
+                break
+
+        if not header_row_idx or "ten" not in col_map:
+            continue
+
+        for row in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
+            if col_map["ten"] >= len(row):
+                continue
+            raw_ten = row[col_map["ten"]]
+            if not raw_ten or not isinstance(raw_ten, str):
+                continue
+
+            dia_chi = row[col_map["dia_chi"]] if "dia_chi" in col_map and col_map["dia_chi"] < len(row) else ""
+            sdt = row[col_map["sdt"]] if "sdt" in col_map and col_map["sdt"] < len(row) else ""
+            mst = row[col_map["mst"]] if "mst" in col_map and col_map["mst"] < len(row) else ""
+
+            # Tách trường hợp tên gộp nhiều dòng kiểu "Khách hàng: Tên\nĐịa chỉ: ..."
+            lines = [l.strip() for l in str(raw_ten).split("\n") if l.strip()]
+            if not lines:
+                continue
+            ten_clean = re.sub(r'^(khách hàng|đối tác|nhà cung cấp)\s*:\s*', '', lines[0], flags=re.I).strip()
+            for extra_line in lines[1:]:
+                if extra_line.lower().startswith("địa chỉ") and not dia_chi:
+                    dia_chi = extra_line
+
+            if isinstance(dia_chi, str):
+                dia_chi = re.sub(r'^địa chỉ\s*:\s*', '', dia_chi, flags=re.I).strip()
+            else:
+                dia_chi = ""
+
+            if not ten_clean:
+                continue
+            ten_norm = ten_clean.strip().lower().rstrip(":").strip()
+            skip_words = ("khách hàng", "đối tác", "nhà cung cấp", "tên", "stt",
+                          "tổng cộng", "thành tiền", "ghi chú", "người bán", "người mua")
+            if ten_norm in skip_words or ten_norm.startswith("địa chỉ"):
+                continue
+
+            results.append({
+                "ten": ten_clean,
+                "dia_chi": dia_chi,
+                "sdt": str(sdt).strip() if sdt else "",
+                "mst": str(mst).strip() if mst else "",
+            })
+
+    return results
+
+
+@app.route("/partners/bulk", methods=["GET", "POST"])
+@login_required
+def partner_bulk():
+    if request.method == "POST":
+        raw = request.form.get("bulk_text", "")
+        default_loai = request.form.get("default_loai", "buyer")
+        default_nhom = request.form.get("default_nhom", "").strip()
+        lines = [l for l in raw.replace("\r\n", "\n").split("\n") if l.strip()]
+
+        db = get_db()
+        created = 0
+        errors = []
+        for idx, line in enumerate(lines, start=1):
+            cols = [c.strip() for c in line.split("\t")]
+            if not cols or not cols[0]:
+                errors.append(f"Dòng {idx}: thiếu tên")
+                continue
+            try:
+                ten = cols[0]
+                dia_chi = cols[1] if len(cols) > 1 else ""
+                sdt = cols[2] if len(cols) > 2 else ""
+                mst = cols[3] if len(cols) > 3 else ""
+                ghi_chu = cols[4] if len(cols) > 4 else ""
+                db.execute(
+                    """INSERT INTO partners (loai, nhom, ten, dia_chi, sdt, mst, ghi_chu)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (default_loai, default_nhom, ten, dia_chi, sdt, mst, ghi_chu),
+                )
+                created += 1
+            except Exception as e:
+                errors.append(f"Dòng {idx}: lỗi xử lý ({e})")
+
+        db.commit()
+        if created:
+            flash(f"Đã thêm {created} đối tác.", "success")
+        if errors:
+            flash("Một số dòng bị bỏ qua: " + " | ".join(errors[:10]), "danger")
+        return redirect(url_for("partner_list"))
+
+    return render_template("partner_bulk.html")
+
+
+@app.route("/partners/import_excel", methods=["POST"])
+@login_required
+def partner_import_excel():
+    default_nhom = request.form.get("default_nhom", "").strip()
+    loai = request.form.get("loai", "buyer")
+    file = request.files.get("excel_file")
+
+    if not file or not file.filename:
+        flash("Vui lòng chọn file Excel.", "danger")
+        return redirect(url_for("partner_bulk"))
+
+    try:
+        rows = extract_partners_from_excel(file.stream)
+    except Exception as e:
+        flash(f"Không đọc được file Excel: {e}", "danger")
+        return redirect(url_for("partner_bulk"))
+
+    if not rows:
+        flash("Không tìm thấy cột 'Khách hàng'/'Đối tác' trong file. Hãy dùng cách dán thủ công bên dưới.", "danger")
+        return redirect(url_for("partner_bulk"))
+
+    db = get_db()
+    created, skipped = 0, 0
+    for r in rows:
+        existing = db.execute(
+            "SELECT id FROM partners WHERE loai=? AND ten=? AND IFNULL(nhom,'')=?",
+            (loai, r["ten"], default_nhom),
+        ).fetchone()
+        if existing:
+            skipped += 1
+            continue
+        db.execute(
+            "INSERT INTO partners (loai, nhom, ten, dia_chi, sdt, mst) VALUES (?,?,?,?,?,?)",
+            (loai, default_nhom, r["ten"], r["dia_chi"], r["sdt"], r["mst"]),
+        )
+        created += 1
+    db.commit()
+
+    flash(f"Đã thêm {created} đối tác mới" + (f", bỏ qua {skipped} đối tác đã có sẵn." if skipped else "."), "success")
+    return redirect(url_for("partner_list"))
+
+
 # ---------- Tạo hóa đơn bán hàng (in được, nhiều mặt hàng) ----------
 
 @app.route("/sales")
@@ -802,12 +1227,14 @@ def sales_new():
             })
 
         partners_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM partners ORDER BY nhom, loai, ten").fetchall()])
+        products_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM products ORDER BY nhom, ten").fetchall()])
 
         if not items:
             flash("Cần ít nhất 1 mặt hàng.", "danger")
             return render_template(
                 "sales_form.html", invoice=None, items=[],
                 today=datetime.now().strftime("%Y-%m-%d"), partners_json=partners_json,
+                products_json=products_json,
             )
 
         nhom = f.get("nhom", "").strip()
@@ -865,9 +1292,11 @@ def sales_new():
         return redirect(url_for("sales_view", invoice_id=invoice_id))
 
     partners_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM partners ORDER BY nhom, loai, ten").fetchall()])
+    products_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM products ORDER BY nhom, ten").fetchall()])
     return render_template(
         "sales_form.html", invoice=None, items=[],
         today=datetime.now().strftime("%Y-%m-%d"), partners_json=partners_json,
+        products_json=products_json,
     )
 
 

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ "Sửa" if product else "Thêm" }} sản phẩm{% endblock %}
+{% block content %}
+<h4 class="mb-3">{{ "Sửa sản phẩm" if product else "Thêm sản phẩm" }}</h4>
+
+<form method="post" class="card p-4" style="max-width:640px;">
+  <div class="mb-3">
+    <label class="form-label">Nhóm/Khách hàng (để tách danh mục riêng cho từng khách)</label>
+    <input type="text" name="nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD"
+           value="{{ product.nhom if product else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Tên hàng *</label>
+    <input type="text" name="ten" class="form-control" required value="{{ product.ten if product else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Quy cách sản phẩm</label>
+    <input type="text" name="quy_cach" class="form-control" value="{{ product.quy_cach if product else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Đơn vị tính</label>
+    <input type="text" name="dvt" class="form-control" value="{{ product.dvt if product else '' }}">
+  </div>
+  <div class="row">
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Giá mua</label>
+      <input type="number" step="any" name="gia_mua" id="giaMua" class="form-control" value="{{ product.gia_mua if product else 0 }}">
+    </div>
+    <div class="col-md-6 mb-3">
+      <label class="form-label">Giá bán</label>
+      <input type="number" step="any" name="gia_ban" id="giaBan" class="form-control" value="{{ product.gia_ban if product else 0 }}">
+    </div>
+  </div>
+  <div class="row align-items-end mb-3">
+    <div class="col-md-6">
+      <label class="form-label small text-muted">Hoặc tự tính giá bán từ giá mua (% lãi mong muốn)</label>
+      <input type="number" step="any" id="markupPercent" class="form-control form-control-sm" placeholder="VD: 10">
+    </div>
+    <div class="col-md-6">
+      <button type="button" class="btn btn-outline-primary btn-sm" onclick="tinhGiaBan()">Tính giá bán</button>
+    </div>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Ghi chú</label>
+    <input type="text" name="ghi_chu" class="form-control" value="{{ product.ghi_chu if product else '' }}">
+  </div>
+  <button type="submit" class="btn btn-success">Lưu</button>
+  <a href="{{ url_for('product_list') }}" class="btn btn-outline-secondary">Hủy</a>
+</form>
+
+<script>
+function tinhGiaBan() {
+  const giaMua = parseFloat(document.getElementById("giaMua").value) || 0;
+  const percent = parseFloat(document.getElementById("markupPercent").value) || 0;
+  if (giaMua <= 0) {
+    alert("Nhập Giá mua trước đã.");
+    return;
+  }
+  const giaBan = Math.round(giaMua * (1 + percent / 100));
+  document.getElementById("giaBan").value = giaBan;
+}
+</script>
+{% endblock %}

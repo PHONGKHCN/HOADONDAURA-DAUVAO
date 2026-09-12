@@ -34,14 +34,6 @@
       <label class="form-label">Tên đối tác *</label>
       <input type="text" name="doi_tac" class="form-control" required value="{{ invoice.doi_tac if invoice else '' }}">
     </div>
-    <div class="col-md-3">
-      <label class="form-label">Mã số thuế</label>
-      <input type="text" name="mst" class="form-control" value="{{ invoice.mst if invoice else '' }}">
-    </div>
-    <div class="col-md-3">
-      <label class="form-label">Thuế suất (%) *</label>
-      <input type="number" step="any" name="thue_suat" class="form-control" required value="{{ invoice.thue_suat if invoice else 10 }}">
-    </div>
 
     <div class="col-md-12">
       <label class="form-label">Mặt hàng/Dịch vụ</label>
@@ -49,7 +41,7 @@
     </div>
 
     <div class="col-md-6">
-      <label class="form-label">Doanh số chưa thuế (đ) *</label>
+      <label class="form-label">Số tiền (đ) *</label>
       <input type="number" step="any" name="doanh_so" id="doanhSo" class="form-control" required value="{{ invoice.doanh_so if invoice else 0 }}">
     </div>
     <div class="col-md-6">

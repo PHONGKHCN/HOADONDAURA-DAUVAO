@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Nhập hàng loạt sản phẩm{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Nhập hàng loạt sản phẩm vào danh mục</h4>
+  <a href="{{ url_for('product_list') }}" class="btn btn-outline-secondary btn-sm">← Danh sách</a>
+</div>
+
+<div class="card p-4 mb-3">
+  <h5 class="mb-3">📁 Cách 1: Tải file Excel lên trực tiếp (khuyên dùng)</h5>
+  <div class="alert alert-info small">
+    Áp dụng cho <strong>bất kỳ file Excel nào</strong> có một sheet chứa cột tên gần giống
+    "Tên hàng hóa", "Quy cách sản phẩm", "Đơn giá", "Đơn vị tính" — hệ thống tự tìm và đọc,
+    không cần đúng định dạng tuyệt đối. Mỗi người có thể tải file của riêng mình lên, không cần chỉnh sửa trước.
+  </div>
+  <form method="post" action="{{ url_for('product_import_excel') }}" enctype="multipart/form-data">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label">Chọn file Excel</label>
+        <input type="file" name="excel_file" accept=".xlsx,.xlsm,.xls" class="form-control" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Giá trong file này là</label>
+        <select name="loai_gia" id="loaiGiaUpload" class="form-select" onchange="toggleMarkupUpload()">
+          <option value="gia_ban">Giá bán</option>
+          <option value="gia_mua">Giá mua</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Nhóm/Khách hàng</label>
+        <input type="text" name="default_nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD">
+      </div>
+      <div class="col-md-3" id="markupUploadBox" style="display:none;">
+        <label class="form-label small">Tự tính giá bán (+% lãi)</label>
+        <input type="number" step="any" name="markup_percent" class="form-control" placeholder="VD: 10">
+      </div>
+    </div>
+    <div class="small text-muted mt-2">
+      💡 Nếu bạn có 2 file riêng (1 file giá bán, 1 file giá mua) — tải lần lượt từng file,
+      chọn đúng loại giá mỗi lần. Sản phẩm trùng tên (cùng Nhóm) sẽ được cập nhật thêm giá, không tạo trùng dòng mới.
+      Nếu chỉ có file giá mua, điền % lãi mong muốn để hệ thống tự tính luôn giá bán (chỉ áp dụng cho sản phẩm chưa có giá bán).
+    </div>
+    <button type="submit" class="btn btn-primary mt-3">⬆ Tải lên và nhập</button>
+  </form>
+</div>
+
+<div class="card p-4">
+  <h5 class="mb-3">📋 Cách 2: Dán thủ công từ Excel</h5>
+  <div class="alert alert-secondary small">
+    <strong>Cách dùng:</strong> Mở file Excel danh mục sản phẩm cũ của bạn (cột: Tên hàng hóa, Quy cách sản phẩm,
+    Đơn vị tính, Đơn giá), sắp xếp lại theo đúng thứ tự dưới đây rồi copy toàn bộ dán vào ô bên dưới —
+    mỗi dòng là 1 sản phẩm:
+    <br>
+    <code>Tên hàng | Quy cách | ĐVT | Giá bán | Giá mua | Ghi chú</code>
+    <ul class="mb-0 mt-2">
+      <li>Chỉ bắt buộc cột <strong>Tên hàng</strong>, các cột còn lại để trống cũng được</li>
+      <li>Nếu bạn chỉ có 1 loại giá, để trống cột còn lại</li>
+    </ul>
+  </div>
+
+  <form method="post">
+    <div class="mb-3">
+      <label class="form-label">Nhóm/Khách hàng (áp dụng cho tất cả dòng dán vào)</label>
+      <input type="text" name="default_nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD">
+    </div>
+    <div class="mb-3">
+      <label class="form-label small">Nếu dòng nào chỉ có Giá mua, thiếu Giá bán — tự tính bằng (% lãi mong muốn)</label>
+      <input type="number" step="any" name="markup_percent" class="form-control" placeholder="Để trống nếu không cần tự tính" style="max-width:220px;">
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Dán danh sách sản phẩm từ Excel</label>
+      <textarea name="bulk_text" class="form-control" rows="10" required
+                placeholder="Xi mang Ha Tien PCB40&#9;Bao 50kg&#9;Bao&#9;89000&#9;86000
+Xi mang Nghi Son PCB40&#9;Bao 50kg&#9;Bao&#9;86000&#9;82000
+Thep Hoa Phat Φ6&#9;Cay 11.7m&#9;Cay&#9;98000&#9;94000"></textarea>
+    </div>
+
+    <button type="submit" class="btn btn-success">Thêm tất cả vào danh mục</button>
+    <a href="{{ url_for('product_list') }}" class="btn btn-outline-secondary">Hủy</a>
+  </form>
+</div>
+
+<script>
+function toggleMarkupUpload() {
+  const loai = document.getElementById("loaiGiaUpload").value;
+  document.getElementById("markupUploadBox").style.display = (loai === "gia_mua") ? "block" : "none";
+}
+</script>
+{% endblock %}

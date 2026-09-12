@@ -2,7 +2,7 @@
 {% block title %}Bảng kê hóa đơn{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h4 class="mb-0">Bảng kê hóa đơn (thuế GTGT)</h4>
+  <h4 class="mb-0">Bảng kê hóa đơn (Đầu vào / Đầu ra)</h4>
   <div>
     <a href="{{ url_for('invoice_bulk') }}" class="btn btn-outline-success btn-sm">📋 Nhập hàng loạt</a>
     <a href="{{ url_for('invoice_new') }}" class="btn btn-primary btn-sm">+ Thêm hóa đơn</a>
@@ -29,7 +29,7 @@
     <input type="month" name="period" value="{{ period }}" class="form-control form-control-sm">
   </div>
   <div class="col-auto">
-    <input type="text" name="q" value="{{ q }}" placeholder="Tìm đối tác/số HĐ/MST" class="form-control form-control-sm">
+    <input type="text" name="q" value="{{ q }}" placeholder="Tìm đối tác/số HĐ" class="form-control form-control-sm">
   </div>
   <div class="col-auto">
     <button class="btn btn-sm btn-outline-primary">Lọc</button>
@@ -41,8 +41,8 @@
     <table class="table table-hover mb-0">
       <thead>
         <tr>
-          <th>Loại</th><th>Nhóm</th><th>Ngày</th><th>Số HĐ</th><th>Đối tác</th><th>MST</th>
-          <th class="text-end">Doanh số</th><th class="text-end">Thuế</th><th class="text-end">Tổng</th>
+          <th>Loại</th><th>Nhóm</th><th>Ngày</th><th>Số HĐ</th><th>Đối tác</th><th>Mặt hàng</th>
+          <th class="text-end">Số tiền</th>
           <th>Người tạo</th><th class="text-center">Thao tác</th>
         </tr>
       </thead>
@@ -54,9 +54,7 @@
           <td>{{ inv.ngay_lap }}</td>
           <td>{{ inv.ky_hieu }}{{ inv.so_hd }}</td>
           <td>{{ inv.doi_tac }}</td>
-          <td>{{ inv.mst }}</td>
-          <td class="text-end">{{ "{:,.0f}".format(inv.doanh_so) }}</td>
-          <td class="text-end">{{ "{:,.0f}".format(inv.tien_thue) }}</td>
+          <td>{{ inv.mat_hang }}</td>
           <td class="text-end">{{ "{:,.0f}".format(inv.tong_cong) }}</td>
           <td class="small text-muted">{{ inv.nguoi_tao_ten or inv.nguoi_tao_username }}</td>
           <td class="text-center">
@@ -68,7 +66,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="11" class="text-center text-muted py-4">Không có dữ liệu.</td></tr>
+        <tr><td colspan="9" class="text-center text-muted py-4">Không có dữ liệu.</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Sản phẩm{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Danh mục sản phẩm (chọn nhanh khi tạo hóa đơn)</h4>
+  <div>
+    <a href="{{ url_for('product_bulk') }}" class="btn btn-outline-success btn-sm">📋 Nhập hàng loạt</a>
+    <a href="{{ url_for('product_new') }}" class="btn btn-primary btn-sm">+ Thêm sản phẩm</a>
+  </div>
+</div>
+
+<form class="row g-2 mb-3" method="get">
+  <div class="col-auto">
+    <select name="nhom" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">Tất cả nhóm/khách hàng</option>
+      {% for n in nhoms %}
+      <option value="{{ n.nhom }}" {{ "selected" if nhom==n.nhom }}>{{ n.nhom }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Nhóm/Khách hàng</th><th>Tên hàng</th><th>Quy cách</th><th>ĐVT</th>
+          <th class="text-end">Giá bán</th><th class="text-end">Giá mua</th>
+          <th class="text-center">Thao tác</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in products %}
+        <tr>
+          <td>{{ p.nhom }}</td>
+          <td>{{ p.ten }}</td>
+          <td>{{ p.quy_cach }}</td>
+          <td>{{ p.dvt }}</td>
+          <td class="text-end">{{ "{:,.0f}".format(p.gia_ban) if p.gia_ban else "" }}</td>
+          <td class="text-end">{{ "{:,.0f}".format(p.gia_mua) if p.gia_mua else "" }}</td>
+          <td class="text-center">
+            <a href="{{ url_for('product_edit', product_id=p.id) }}" class="btn btn-sm btn-outline-secondary">Sửa</a>
+            <form method="post" action="{{ url_for('product_delete', product_id=p.id) }}" class="d-inline"
+                  onsubmit="return confirm('Xóa sản phẩm này?');">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Xóa</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-muted py-4">Chưa có sản phẩm nào trong danh mục.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

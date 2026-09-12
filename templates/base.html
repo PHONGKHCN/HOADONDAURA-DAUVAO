@@ -25,8 +25,9 @@
     <div class="collapse navbar-collapse" id="nav1">
       <ul class="navbar-nav me-auto">
         <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Tổng quan</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('invoice_list') }}">Bảng kê thuế</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('invoice_list') }}">Bảng kê</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('sales_list') }}">Tạo hóa đơn</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('product_list') }}">Sản phẩm</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('partner_list') }}">Đối tác</a></li>
         {% if current_user.is_admin %}
         <li class="nav-item"><a class="nav-link" href="{{ url_for('user_list') }}">Tài khoản</a></li>

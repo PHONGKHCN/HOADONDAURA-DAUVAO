@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Nhập hàng loạt đối tác{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Nhập hàng loạt đối tác (bên bán / bên mua)</h4>
+  <a href="{{ url_for('partner_list') }}" class="btn btn-outline-secondary btn-sm">← Danh sách</a>
+</div>
+
+<div class="card p-4 mb-3">
+  <h5 class="mb-3">📁 Cách 1: Tải file Excel lên trực tiếp (khuyên dùng)</h5>
+  <div class="alert alert-info small">
+    Áp dụng cho file Excel có sheet chứa cột tên gần giống "Khách hàng", "Đối tác", "Nhà cung cấp"
+    (kèm cột Địa chỉ/Điện thoại/MST nếu có) — hệ thống tự tìm và đọc, kể cả khi tên và địa chỉ
+    gộp chung 1 ô nhiều dòng như file mẫu VLXD.
+  </div>
+  <form method="post" action="{{ url_for('partner_import_excel') }}" enctype="multipart/form-data">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label">Chọn file Excel</label>
+        <input type="file" name="excel_file" accept=".xlsx,.xlsm,.xls" class="form-control" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Danh sách này là</label>
+        <select name="loai" class="form-select">
+          <option value="buyer">Bên mua (khách hàng)</option>
+          <option value="seller">Bên bán (nhà cung cấp)</option>
+        </select>
+      </div>
+      <div class="col-md-5">
+        <label class="form-label">Nhóm/Khách hàng</label>
+        <input type="text" name="default_nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD">
+      </div>
+    </div>
+    <div class="small text-muted mt-2">
+      💡 Đối tác trùng tên (cùng loại + cùng nhóm) sẽ được bỏ qua, không tạo trùng.
+    </div>
+    <button type="submit" class="btn btn-primary mt-3">⬆ Tải lên và nhập</button>
+  </form>
+</div>
+
+<div class="card p-4">
+  <h5 class="mb-3">📋 Cách 2: Dán thủ công từ Excel</h5>
+  <div class="alert alert-secondary small">
+    <strong>Cách dùng:</strong> Chuẩn bị cột theo đúng thứ tự rồi copy dán vào ô bên dưới — mỗi dòng là 1 đối tác:
+    <br>
+    <code>Tên | Địa chỉ | SĐT | MST | Ghi chú</code>
+    <br>Chỉ bắt buộc cột <strong>Tên</strong>, các cột còn lại để trống cũng được.
+  </div>
+
+  <form method="post">
+    <div class="row g-2 mb-3">
+      <div class="col-md-4">
+        <label class="form-label">Danh sách này là</label>
+        <select name="default_loai" class="form-select">
+          <option value="buyer">Bên mua (khách hàng)</option>
+          <option value="seller">Bên bán (nhà cung cấp)</option>
+        </select>
+      </div>
+      <div class="col-md-8">
+        <label class="form-label">Nhóm/Khách hàng (áp dụng cho tất cả dòng dán vào)</label>
+        <input type="text" name="default_nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD">
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Dán danh sách đối tác từ Excel</label>
+      <textarea name="bulk_text" class="form-control" rows="10" required
+                placeholder="Do Anh Tuan&#9;Long Thanh, Dong Nai
+Hoang Minh Duc&#9;An Phuoc, Dong Nai"></textarea>
+    </div>
+
+    <button type="submit" class="btn btn-success">Thêm tất cả vào danh mục</button>
+    <a href="{{ url_for('partner_list') }}" class="btn btn-outline-secondary">Hủy</a>
+  </form>
+</div>
+{% endblock %}

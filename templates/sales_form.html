@@ -91,6 +91,12 @@
       <span class="small text-muted ms-2">Không cần cột nào cũng được, hệ thống tự nhận diện theo thứ tự</span>
     </div>
 
+    <div class="small text-muted mb-2">
+      💡 Gõ tên hàng đã có trong <a href="{{ url_for('product_list') }}" target="_blank">danh mục sản phẩm</a>
+      sẽ hiện gợi ý — chọn xong tự điền quy cách/ĐVT/giá bán.
+    </div>
+    <datalist id="productList"></datalist>
+
     <div class="table-responsive">
       <table class="table table-bordered align-middle" id="itemsTable">
         <thead>
@@ -119,11 +125,39 @@
 <script>
 let rowCount = 0;
 const ALL_PARTNERS = {{ partners_json | safe }};
+const ALL_PRODUCTS = {{ products_json | safe }};
 
 function populateNhomList() {
-  const nhoms = [...new Set(ALL_PARTNERS.map(p => p.nhom).filter(n => n))];
+  const nhoms = [...new Set([...ALL_PARTNERS, ...ALL_PRODUCTS].map(p => p.nhom).filter(n => n))];
   const dl = document.getElementById("nhomList");
   dl.innerHTML = nhoms.map(n => `<option value="${n}">`).join("");
+}
+
+function refreshProductList() {
+  const nhom = document.getElementById("nhomInput").value.trim();
+  const filtered = nhom ? ALL_PRODUCTS.filter(p => p.nhom === nhom) : ALL_PRODUCTS;
+  const dl = document.getElementById("productList");
+  dl.innerHTML = [...new Set(filtered.map(p => p.ten))].map(t => `<option value="${t}">`).join("");
+}
+
+function findProduct(ten) {
+  const nhom = document.getElementById("nhomInput").value.trim();
+  const filtered = nhom ? ALL_PRODUCTS.filter(p => p.nhom === nhom) : ALL_PRODUCTS;
+  return filtered.find(p => p.ten === ten) || ALL_PRODUCTS.find(p => p.ten === ten);
+}
+
+function attachProductAutofill(tr) {
+  const tenInput = tr.querySelector('[name="ten_hang[]"]');
+  tenInput.addEventListener("input", function() {
+    const p = findProduct(this.value.trim());
+    if (p) {
+      tr.querySelector('[name="quy_cach[]"]').value = p.quy_cach || "";
+      tr.querySelector('[name="dvt[]"]').value = p.dvt || "";
+      const giaInput = tr.querySelector('[name="don_gia[]"]');
+      if (p.gia_ban) giaInput.value = p.gia_ban;
+      recalc();
+    }
+  });
 }
 
 function refreshPartnerSelects() {
@@ -138,7 +172,10 @@ function refreshPartnerSelects() {
     filtered.filter(p => p.loai === "buyer").map(p => `<option value="${p.id}">${p.ten}${p.nhom ? " (" + p.nhom + ")" : ""}</option>`).join("");
 }
 
-document.getElementById("nhomInput").addEventListener("input", refreshPartnerSelects);
+document.getElementById("nhomInput").addEventListener("input", function() {
+  refreshPartnerSelects();
+  refreshProductList();
+});
 
 document.getElementById("sellerSelect").addEventListener("change", function() {
   const p = ALL_PARTNERS.find(x => String(x.id) === this.value);
@@ -161,6 +198,7 @@ document.getElementById("buyerSelect").addEventListener("change", function() {
 
 populateNhomList();
 refreshPartnerSelects();
+refreshProductList();
 
 function addRow() {
   rowCount++;
@@ -168,7 +206,7 @@ function addRow() {
   const tr = document.createElement("tr");
   tr.innerHTML = `
     <td class="text-center stt">${rowCount}</td>
-    <td><input type="text" name="ten_hang[]" class="form-control form-control-sm"></td>
+    <td><input type="text" name="ten_hang[]" class="form-control form-control-sm" list="productList"></td>
     <td><input type="text" name="quy_cach[]" class="form-control form-control-sm"></td>
     <td><input type="text" name="dvt[]" class="form-control form-control-sm"></td>
     <td><input type="number" step="any" name="so_luong[]" class="form-control form-control-sm sl" value="0"></td>
@@ -178,6 +216,7 @@ function addRow() {
   `;
   tbody.appendChild(tr);
   tr.querySelectorAll(".sl, .dg").forEach(inp => inp.addEventListener("input", recalc));
+  attachProductAutofill(tr);
   recalc();
 }
 
@@ -238,7 +277,7 @@ function importFromPaste() {
 
     tr.innerHTML = `
       <td class="text-center stt">${rowCount}</td>
-      <td><input type="text" name="ten_hang[]" class="form-control form-control-sm" value="${ten_hang.replace(/"/g,'&quot;')}"></td>
+      <td><input type="text" name="ten_hang[]" class="form-control form-control-sm" list="productList" value="${ten_hang.replace(/"/g,'&quot;')}"></td>
       <td><input type="text" name="quy_cach[]" class="form-control form-control-sm" value="${quy_cach.replace(/"/g,'&quot;')}"></td>
       <td><input type="text" name="dvt[]" class="form-control form-control-sm" value="${dvt.replace(/"/g,'&quot;')}"></td>
       <td><input type="number" step="any" name="so_luong[]" class="form-control form-control-sm sl" value="${so_luong}"></td>
@@ -248,6 +287,7 @@ function importFromPaste() {
     `;
     tbody.appendChild(tr);
     tr.querySelectorAll(".sl, .dg").forEach(inp => inp.addEventListener("input", recalc));
+    attachProductAutofill(tr);
     added++;
   });
 
