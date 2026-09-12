@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Đối tác{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Danh mục đối tác (bên bán / bên mua đã lưu)</h4>
+  <a href="{{ url_for('partner_new') }}" class="btn btn-primary btn-sm">+ Thêm đối tác</a>
+</div>
+
+<form class="row g-2 mb-3" method="get">
+  <div class="col-auto">
+    <select name="nhom" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">Tất cả nhóm/khách hàng</option>
+      {% for n in nhoms %}
+      <option value="{{ n.nhom }}" {{ "selected" if nhom==n.nhom }}>{{ n.nhom }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Loại</th><th>Nhóm/Khách hàng</th><th>Tên</th><th>Địa chỉ</th><th>SĐT</th><th>MST</th>
+          <th class="text-center">Thao tác</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in partners %}
+        <tr>
+          <td><span class="badge {{ 'badge-in' if p.loai=='seller' else 'badge-out' }}">{{ "Bên bán" if p.loai=="seller" else "Bên mua" }}</span></td>
+          <td>{{ p.nhom }}</td>
+          <td>{{ p.ten }}</td>
+          <td>{{ p.dia_chi }}</td>
+          <td>{{ p.sdt }}</td>
+          <td>{{ p.mst }}</td>
+          <td class="text-center">
+            <a href="{{ url_for('partner_edit', partner_id=p.id) }}" class="btn btn-sm btn-outline-secondary">Sửa</a>
+            <form method="post" action="{{ url_for('partner_delete', partner_id=p.id) }}" class="d-inline"
+                  onsubmit="return confirm('Xóa đối tác này?');">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Xóa</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-muted py-4">Chưa có đối tác nào được lưu.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ "Sửa" if partner else "Thêm" }} đối tác{% endblock %}
+{% block content %}
+<h4 class="mb-3">{{ "Sửa đối tác" if partner else "Thêm đối tác" }}</h4>
+
+<form method="post" class="card p-4" style="max-width:640px;">
+  <div class="mb-3">
+    <label class="form-label">Loại *</label>
+    <select name="loai" class="form-select" required>
+      <option value="seller" {{ "selected" if partner and partner.loai=="seller" }}>Bên bán (nhà cung cấp - dùng cho hóa đơn đầu vào)</option>
+      <option value="buyer" {{ "selected" if partner and partner.loai=="buyer" }}>Bên mua (khách hàng - dùng cho hóa đơn đầu ra)</option>
+    </select>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Nhóm/Khách hàng (để phân biệt theo từng khách bạn quản lý)</label>
+    <input type="text" name="nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD"
+           value="{{ partner.nhom if partner else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Tên *</label>
+    <input type="text" name="ten" class="form-control" required value="{{ partner.ten if partner else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Địa chỉ</label>
+    <input type="text" name="dia_chi" class="form-control" value="{{ partner.dia_chi if partner else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Điện thoại</label>
+    <input type="text" name="sdt" class="form-control" value="{{ partner.sdt if partner else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Mã số thuế</label>
+    <input type="text" name="mst" class="form-control" value="{{ partner.mst if partner else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Ghi chú</label>
+    <input type="text" name="ghi_chu" class="form-control" value="{{ partner.ghi_chu if partner else '' }}">
+  </div>
+  <button type="submit" class="btn btn-success">Lưu</button>
+  <a href="{{ url_for('partner_list') }}" class="btn btn-outline-secondary">Hủy</a>
+</form>
+{% endblock %}

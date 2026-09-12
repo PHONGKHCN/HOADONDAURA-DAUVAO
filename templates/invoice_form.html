@@ -13,6 +13,11 @@
       </select>
     </div>
     <div class="col-md-3">
+      <label class="form-label">Nhóm/Khách hàng</label>
+      <input type="text" name="nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD"
+             value="{{ invoice.nhom if invoice else '' }}">
+    </div>
+    <div class="col-md-3">
       <label class="form-label">Ký hiệu HĐ</label>
       <input type="text" name="ky_hieu" class="form-control" value="{{ invoice.ky_hieu if invoice else '' }}">
     </div>

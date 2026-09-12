@@ -6,16 +6,29 @@
   <a href="{{ url_for('sales_new') }}" class="btn btn-primary btn-sm">+ Tạo hóa đơn mới</a>
 </div>
 
+<form class="row g-2 mb-3" method="get">
+  <div class="col-auto">
+    <select name="nhom" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">Tất cả nhóm/khách hàng</option>
+      {% for n in nhoms %}
+      <option value="{{ n.nhom }}" {{ "selected" if nhom==n.nhom }}>{{ n.nhom }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
 <div class="card">
   <div class="table-responsive">
     <table class="table table-hover mb-0">
       <thead>
         <tr>
           <th>Ngày</th>
+          <th>Nhóm</th>
           <th>Số HĐ</th>
           <th>Bên bán</th>
           <th>Khách hàng</th>
           <th class="text-end">Tổng tiền (đ)</th>
+          <th>Người tạo</th>
           <th class="text-center">Thao tác</th>
         </tr>
       </thead>
@@ -23,10 +36,12 @@
         {% for inv in invoices %}
         <tr>
           <td>{{ inv.ngay_lap }}</td>
+          <td>{{ inv.nhom }}</td>
           <td>{{ inv.so_hd or "—" }}</td>
           <td>{{ inv.seller_name }}</td>
           <td>{{ inv.buyer_name }}</td>
           <td class="text-end">{{ "{:,.0f}".format(inv.tong_cong) }}</td>
+          <td class="small text-muted">{{ inv.nguoi_tao_ten or inv.nguoi_tao_username }}</td>
           <td class="text-center">
             <a href="{{ url_for('sales_view', invoice_id=inv.id) }}" class="btn btn-sm btn-outline-secondary">Xem</a>
             <a href="{{ url_for('sales_pdf', invoice_id=inv.id) }}" class="btn btn-sm btn-outline-primary">PDF</a>
@@ -37,7 +52,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="text-center text-muted py-4">Chưa có hóa đơn nào.</td></tr>
+        <tr><td colspan="8" class="text-center text-muted py-4">Chưa có hóa đơn nào.</td></tr>
         {% endfor %}
       </tbody>
     </table>

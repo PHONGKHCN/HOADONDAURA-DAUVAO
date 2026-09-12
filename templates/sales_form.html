@@ -8,15 +8,27 @@
 
 <form method="post">
   <div class="card p-3 mb-3">
+    <h6 class="text-muted">Nhóm/Khách hàng (để lưu & lọc danh sách đối tác riêng cho từng khách)</h6>
+    <input type="text" id="nhomInput" name="nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD" list="nhomList">
+    <datalist id="nhomList"></datalist>
+  </div>
+
+  <div class="card p-3 mb-3">
     <h6 class="text-muted">Thông tin bên bán</h6>
+    <div class="mb-2">
+      <label class="form-label small">Chọn từ danh sách đã lưu (tùy chọn)</label>
+      <select id="sellerSelect" class="form-select form-select-sm">
+        <option value="">-- Nhập mới --</option>
+      </select>
+    </div>
     <div class="row g-2">
       <div class="col-md-6">
         <label class="form-label">Tên cửa hàng / đơn vị bán *</label>
-        <input type="text" name="seller_name" class="form-control" required>
+        <input type="text" name="seller_name" id="sellerName" class="form-control" required>
       </div>
       <div class="col-md-4">
         <label class="form-label">Điện thoại</label>
-        <input type="text" name="seller_phone" class="form-control">
+        <input type="text" name="seller_phone" id="sellerPhone" class="form-control">
       </div>
       <div class="col-md-2">
         <label class="form-label">Số HĐ (nếu có)</label>
@@ -24,26 +36,40 @@
       </div>
       <div class="col-md-8">
         <label class="form-label">Địa chỉ</label>
-        <input type="text" name="seller_address" class="form-control">
+        <input type="text" name="seller_address" id="sellerAddress" class="form-control">
       </div>
       <div class="col-md-4">
         <label class="form-label">Ngày lập *</label>
         <input type="date" name="ngay_lap" class="form-control" value="{{ today }}" required>
       </div>
     </div>
+    <div class="form-check mt-2">
+      <input class="form-check-input" type="checkbox" name="save_seller" id="saveSeller" value="1">
+      <label class="form-check-label small" for="saveSeller">Lưu bên bán này vào danh sách để dùng lại lần sau</label>
+    </div>
   </div>
 
   <div class="card p-3 mb-3">
     <h6 class="text-muted">Thông tin khách hàng</h6>
+    <div class="mb-2">
+      <label class="form-label small">Chọn từ danh sách đã lưu (tùy chọn)</label>
+      <select id="buyerSelect" class="form-select form-select-sm">
+        <option value="">-- Nhập mới --</option>
+      </select>
+    </div>
     <div class="row g-2">
       <div class="col-md-6">
         <label class="form-label">Tên khách hàng *</label>
-        <input type="text" name="buyer_name" class="form-control" required>
+        <input type="text" name="buyer_name" id="buyerName" class="form-control" required>
       </div>
       <div class="col-md-6">
         <label class="form-label">Địa chỉ</label>
-        <input type="text" name="buyer_address" class="form-control">
+        <input type="text" name="buyer_address" id="buyerAddress" class="form-control">
       </div>
+    </div>
+    <div class="form-check mt-2">
+      <input class="form-check-input" type="checkbox" name="save_buyer" id="saveBuyer" value="1">
+      <label class="form-check-label small" for="saveBuyer">Lưu bên mua này vào danh sách để dùng lại lần sau</label>
     </div>
   </div>
 
@@ -52,6 +78,19 @@
       <h6 class="text-muted mb-0">Mặt hàng</h6>
       <button type="button" class="btn btn-sm btn-primary" onclick="addRow()">+ Thêm dòng</button>
     </div>
+
+    <div class="mb-3 p-2 border rounded bg-light">
+      <label class="form-label small mb-1">
+        📋 Dán danh sách từ Excel (copy các cột <strong>Tên hàng, Quy cách, ĐVT, SL, Đơn giá</strong> rồi dán vào đây)
+      </label>
+      <textarea id="pasteArea" class="form-control form-control-sm" rows="3"
+                placeholder="Dán dữ liệu copy từ Excel vào đây (mỗi dòng 1 mặt hàng)..."></textarea>
+      <button type="button" class="btn btn-sm btn-outline-success mt-2" onclick="importFromPaste()">
+        ⬇ Thêm vào bảng
+      </button>
+      <span class="small text-muted ms-2">Không cần cột nào cũng được, hệ thống tự nhận diện theo thứ tự</span>
+    </div>
+
     <div class="table-responsive">
       <table class="table table-bordered align-middle" id="itemsTable">
         <thead>
@@ -79,6 +118,49 @@
 
 <script>
 let rowCount = 0;
+const ALL_PARTNERS = {{ partners_json | safe }};
+
+function populateNhomList() {
+  const nhoms = [...new Set(ALL_PARTNERS.map(p => p.nhom).filter(n => n))];
+  const dl = document.getElementById("nhomList");
+  dl.innerHTML = nhoms.map(n => `<option value="${n}">`).join("");
+}
+
+function refreshPartnerSelects() {
+  const nhom = document.getElementById("nhomInput").value.trim();
+  const filtered = nhom ? ALL_PARTNERS.filter(p => p.nhom === nhom) : ALL_PARTNERS;
+
+  const sellerSelect = document.getElementById("sellerSelect");
+  const buyerSelect = document.getElementById("buyerSelect");
+  sellerSelect.innerHTML = '<option value="">-- Nhập mới --</option>' +
+    filtered.filter(p => p.loai === "seller").map(p => `<option value="${p.id}">${p.ten}${p.nhom ? " (" + p.nhom + ")" : ""}</option>`).join("");
+  buyerSelect.innerHTML = '<option value="">-- Nhập mới --</option>' +
+    filtered.filter(p => p.loai === "buyer").map(p => `<option value="${p.id}">${p.ten}${p.nhom ? " (" + p.nhom + ")" : ""}</option>`).join("");
+}
+
+document.getElementById("nhomInput").addEventListener("input", refreshPartnerSelects);
+
+document.getElementById("sellerSelect").addEventListener("change", function() {
+  const p = ALL_PARTNERS.find(x => String(x.id) === this.value);
+  if (p) {
+    document.getElementById("sellerName").value = p.ten || "";
+    document.getElementById("sellerAddress").value = p.dia_chi || "";
+    document.getElementById("sellerPhone").value = p.sdt || "";
+    document.getElementById("saveSeller").checked = false;
+  }
+});
+
+document.getElementById("buyerSelect").addEventListener("change", function() {
+  const p = ALL_PARTNERS.find(x => String(x.id) === this.value);
+  if (p) {
+    document.getElementById("buyerName").value = p.ten || "";
+    document.getElementById("buyerAddress").value = p.dia_chi || "";
+    document.getElementById("saveBuyer").checked = false;
+  }
+});
+
+populateNhomList();
+refreshPartnerSelects();
 
 function addRow() {
   rowCount++;
@@ -102,6 +184,77 @@ function addRow() {
 function removeRow(btn) {
   btn.closest("tr").remove();
   renumber();
+  recalc();
+}
+
+function parseSoTien(str) {
+  if (!str) return 0;
+  // Bỏ mọi ký tự không phải số, dấu chấm, dấu phẩy, dấu trừ
+  let s = str.toString().trim().replace(/[^\d.,-]/g, "");
+  if (!s) return 0;
+  // Nếu có cả dấu chấm và phẩy: giả định dấu chấm là phân cách nghìn, phẩy là thập phân (kiểu VN)
+  // hoặc ngược lại. Ưu tiên: bỏ hết dấu phân cách nghìn (chấm hoặc phẩy lặp), giữ dấu cuối làm thập phân nếu có 1-2 chữ số sau.
+  const lastDot = s.lastIndexOf(".");
+  const lastComma = s.lastIndexOf(",");
+  let sep = -1;
+  if (lastDot > lastComma) sep = lastDot; else if (lastComma > lastDot) sep = lastComma;
+  if (sep !== -1 && s.length - sep - 1 <= 2 && s.length - sep - 1 > 0) {
+    const intPart = s.slice(0, sep).replace(/[.,]/g, "");
+    const decPart = s.slice(sep + 1);
+    s = intPart + "." + decPart;
+  } else {
+    s = s.replace(/[.,]/g, "");
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+function importFromPaste() {
+  const raw = document.getElementById("pasteArea").value;
+  if (!raw.trim()) return;
+
+  // Xóa các dòng trống hiện có trước khi thêm dữ liệu dán vào
+  document.querySelectorAll("#itemsBody tr").forEach(tr => {
+    const ten = tr.querySelector('[name="ten_hang[]"]').value.trim();
+    if (!ten) tr.remove();
+  });
+
+  const lines = raw.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+  let added = 0;
+  lines.forEach(line => {
+    const cols = line.split("\t");
+    // Nếu không có tab (dán từ chỗ khác, phân cách bằng nhiều khoảng trắng) thì thử tách theo khoảng trắng kép
+    const parts = cols.length > 1 ? cols : line.split(/\s{2,}/);
+    if (!parts[0] || !parts[0].trim()) return;
+
+    rowCount++;
+    const tbody = document.getElementById("itemsBody");
+    const tr = document.createElement("tr");
+    const ten_hang = (parts[0] || "").trim();
+    const quy_cach = (parts[1] || "").trim();
+    const dvt = (parts[2] || "").trim();
+    const so_luong = parseSoTien(parts[3] || "1") || 1;
+    const don_gia = parseSoTien(parts[4] || "0");
+
+    tr.innerHTML = `
+      <td class="text-center stt">${rowCount}</td>
+      <td><input type="text" name="ten_hang[]" class="form-control form-control-sm" value="${ten_hang.replace(/"/g,'&quot;')}"></td>
+      <td><input type="text" name="quy_cach[]" class="form-control form-control-sm" value="${quy_cach.replace(/"/g,'&quot;')}"></td>
+      <td><input type="text" name="dvt[]" class="form-control form-control-sm" value="${dvt.replace(/"/g,'&quot;')}"></td>
+      <td><input type="number" step="any" name="so_luong[]" class="form-control form-control-sm sl" value="${so_luong}"></td>
+      <td><input type="number" step="any" name="don_gia[]" class="form-control form-control-sm dg" value="${don_gia}"></td>
+      <td class="text-end thanh-tien">0</td>
+      <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRow(this)">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+    tr.querySelectorAll(".sl, .dg").forEach(inp => inp.addEventListener("input", recalc));
+    added++;
+  });
+
+  document.getElementById("pasteArea").value = "";
+  if (added === 0) {
+    addRow();
+  }
   recalc();
 }
 

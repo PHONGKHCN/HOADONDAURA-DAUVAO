@@ -1,4 +1,6 @@
 import os
+import json
+import re
 import sqlite3
 from datetime import datetime
 from io import BytesIO
@@ -47,6 +49,8 @@ def get_db():
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        g.db.execute("PRAGMA journal_mode = WAL")
+        g.db.execute("PRAGMA busy_timeout = 5000")
     return g.db
 
 
@@ -74,6 +78,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS invoices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             loai TEXT NOT NULL,              -- 'dau_ra' | 'dau_vao'
+            nhom TEXT,                       -- nhóm/khách hàng (VLXD, tạp hóa, v.v.)
             ky_hieu TEXT,
             so_hd TEXT NOT NULL,
             ngay_lap TEXT NOT NULL,          -- YYYY-MM-DD
@@ -92,6 +97,7 @@ def init_db():
 
         CREATE TABLE IF NOT EXISTS sales_invoices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nhom TEXT,                    -- nhóm/khách hàng (VLXD, tạp hóa, v.v.)
             so_hd TEXT,
             ngay_lap TEXT NOT NULL,
             seller_name TEXT NOT NULL,
@@ -117,8 +123,27 @@ def init_db():
             thanh_tien REAL NOT NULL DEFAULT 0,
             FOREIGN KEY (invoice_id) REFERENCES sales_invoices(id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS partners (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            loai TEXT NOT NULL,           -- 'seller' | 'buyer'
+            nhom TEXT,                    -- nhóm/khách hàng (vd: "Nguyen Van Do - VLXD")
+            ten TEXT NOT NULL,
+            dia_chi TEXT,
+            sdt TEXT,
+            mst TEXT,
+            ghi_chu TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
         """
     )
+    db.commit()
+
+    # Migration an toàn: thêm cột 'nhom' nếu DB được tạo từ bản cũ chưa có cột này
+    for table in ("invoices", "sales_invoices"):
+        cols = [r["name"] for r in db.execute(f"PRAGMA table_info({table})").fetchall()]
+        if "nhom" not in cols:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN nhom TEXT")
     db.commit()
 
     # Seed one admin account if no users exist yet
@@ -239,32 +264,122 @@ def dashboard():
 
 # ---------- Invoice CRUD ----------
 
+@app.route("/invoices/bulk", methods=["GET", "POST"])
+@login_required
+def invoice_bulk():
+    if request.method == "POST":
+        raw = request.form.get("bulk_text", "")
+        default_loai = request.form.get("default_loai", "")
+        default_nhom = request.form.get("default_nhom", "").strip()
+        lines = [l for l in raw.replace("\r\n", "\n").split("\n") if l.strip()]
+
+        db = get_db()
+        created = 0
+        errors = []
+        for idx, line in enumerate(lines, start=1):
+            cols = [c.strip() for c in line.split("\t")]
+            if len(cols) < 6:
+                errors.append(f"Dòng {idx}: thiếu cột (cần ít nhất 6 cột)")
+                continue
+            try:
+                loai_raw = cols[0].lower()
+                if loai_raw in ("dau_vao", "đầu vào", "vao", "mua", "vào"):
+                    loai = "dau_vao"
+                elif loai_raw in ("dau_ra", "đầu ra", "ra", "ban", "bán"):
+                    loai = "dau_ra"
+                else:
+                    loai = default_loai if default_loai in ("dau_vao", "dau_ra") else None
+                if not loai:
+                    errors.append(f"Dòng {idx}: không nhận diện được Loại ('{cols[0]}')")
+                    continue
+
+                ngay_raw = cols[1].strip()
+                ngay_lap = None
+                for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+                    try:
+                        ngay_lap = datetime.strptime(ngay_raw, fmt).strftime("%Y-%m-%d")
+                        break
+                    except ValueError:
+                        continue
+                if not ngay_lap:
+                    errors.append(f"Dòng {idx}: ngày không hợp lệ ('{ngay_raw}')")
+                    continue
+
+                doi_tac = cols[2]
+                mst = cols[3] if len(cols) > 3 else ""
+                mat_hang = cols[4] if len(cols) > 4 else ""
+                doanh_so_raw = cols[5] if len(cols) > 5 else "0"
+                doanh_so = float(re.sub(r"[^\d.\-]", "", doanh_so_raw.replace(",", "")) or 0)
+                thue_suat = float(cols[6]) if len(cols) > 6 and cols[6] else 10
+                so_hd = cols[7] if len(cols) > 7 else ""
+                ky_hieu = cols[8] if len(cols) > 8 else ""
+                ghi_chu = cols[9] if len(cols) > 9 else ""
+
+                if not doi_tac:
+                    errors.append(f"Dòng {idx}: thiếu tên đối tác")
+                    continue
+
+                tien_thue = round(doanh_so * thue_suat / 100, 0)
+                tong_cong = doanh_so + tien_thue
+
+                db.execute(
+                    """INSERT INTO invoices
+                       (loai, nhom, ky_hieu, so_hd, ngay_lap, doi_tac, mst, mat_hang,
+                        doanh_so, thue_suat, tien_thue, tong_cong, ghi_chu, nguoi_tao_id)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (loai, default_nhom, ky_hieu, so_hd, ngay_lap, doi_tac, mst, mat_hang,
+                     doanh_so, thue_suat, tien_thue, tong_cong, ghi_chu, current_user.id),
+                )
+                created += 1
+            except Exception as e:
+                errors.append(f"Dòng {idx}: lỗi xử lý ({e})")
+
+        db.commit()
+        if created:
+            flash(f"Đã tạo {created} hóa đơn.", "success")
+        if errors:
+            flash("Một số dòng bị bỏ qua: " + " | ".join(errors[:10]) +
+                  (f" (và {len(errors)-10} lỗi khác)" if len(errors) > 10 else ""), "danger")
+        return redirect(url_for("invoice_list"))
+
+    return render_template("invoice_bulk.html")
+
+
 @app.route("/invoices")
 @login_required
 def invoice_list():
     loai = request.args.get("loai", "")
     period = request.args.get("period", "")
+    nhom = request.args.get("nhom", "")
     q = request.args.get("q", "").strip()
 
-    sql = "SELECT * FROM invoices WHERE 1=1"
+    sql = """SELECT inv.*, u.full_name AS nguoi_tao_ten, u.username AS nguoi_tao_username
+             FROM invoices inv LEFT JOIN users u ON inv.nguoi_tao_id = u.id WHERE 1=1"""
     params = []
     if loai in ("dau_ra", "dau_vao"):
-        sql += " AND loai = ?"
+        sql += " AND inv.loai = ?"
         params.append(loai)
+    if nhom:
+        sql += " AND inv.nhom = ?"
+        params.append(nhom)
     if period:
         start, end = month_bounds(period)
-        sql += " AND ngay_lap >= ? AND ngay_lap < ?"
+        sql += " AND inv.ngay_lap >= ? AND inv.ngay_lap < ?"
         params += [start, end]
     if q:
-        sql += " AND (doi_tac LIKE ? OR so_hd LIKE ? OR mst LIKE ?)"
+        sql += " AND (inv.doi_tac LIKE ? OR inv.so_hd LIKE ? OR inv.mst LIKE ?)"
         like = f"%{q}%"
         params += [like, like, like]
-    sql += " ORDER BY ngay_lap DESC, id DESC"
+    sql += " ORDER BY inv.ngay_lap DESC, inv.id DESC"
 
     db = get_db()
     invoices = db.execute(sql, params).fetchall()
+    nhoms = db.execute(
+        "SELECT DISTINCT nhom FROM invoices WHERE nhom IS NOT NULL AND nhom != '' ORDER BY nhom"
+    ).fetchall()
     return render_template(
-        "invoice_list.html", invoices=invoices, loai=loai, period=period, q=q
+        "invoice_list.html", invoices=invoices, loai=loai, period=period, q=q,
+        nhom=nhom, nhoms=nhoms,
     )
 
 
@@ -275,6 +390,7 @@ def parse_invoice_form(form):
     tong_cong = doanh_so + tien_thue
     return {
         "loai": form.get("loai"),
+        "nhom": form.get("nhom", "").strip(),
         "ky_hieu": form.get("ky_hieu", "").strip(),
         "so_hd": form.get("so_hd", "").strip(),
         "ngay_lap": form.get("ngay_lap"),
@@ -297,11 +413,11 @@ def invoice_new():
         db = get_db()
         db.execute(
             """INSERT INTO invoices
-               (loai, ky_hieu, so_hd, ngay_lap, doi_tac, mst, mat_hang,
+               (loai, nhom, ky_hieu, so_hd, ngay_lap, doi_tac, mst, mat_hang,
                 doanh_so, thue_suat, tien_thue, tong_cong, ghi_chu, nguoi_tao_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                data["loai"], data["ky_hieu"], data["so_hd"], data["ngay_lap"],
+                data["loai"], data["nhom"], data["ky_hieu"], data["so_hd"], data["ngay_lap"],
                 data["doi_tac"], data["mst"], data["mat_hang"], data["doanh_so"],
                 data["thue_suat"], data["tien_thue"], data["tong_cong"],
                 data["ghi_chu"], current_user.id,
@@ -325,11 +441,11 @@ def invoice_edit(invoice_id):
     if request.method == "POST":
         data = parse_invoice_form(request.form)
         db.execute(
-            """UPDATE invoices SET loai=?, ky_hieu=?, so_hd=?, ngay_lap=?, doi_tac=?,
+            """UPDATE invoices SET loai=?, nhom=?, ky_hieu=?, so_hd=?, ngay_lap=?, doi_tac=?,
                mst=?, mat_hang=?, doanh_so=?, thue_suat=?, tien_thue=?, tong_cong=?, ghi_chu=?
                WHERE id=?""",
             (
-                data["loai"], data["ky_hieu"], data["so_hd"], data["ngay_lap"],
+                data["loai"], data["nhom"], data["ky_hieu"], data["so_hd"], data["ngay_lap"],
                 data["doi_tac"], data["mst"], data["mat_hang"], data["doanh_so"],
                 data["thue_suat"], data["tien_thue"], data["tong_cong"],
                 data["ghi_chu"], invoice_id,
@@ -558,21 +674,103 @@ def user_delete(user_id):
     return redirect(url_for("user_list"))
 
 
+# ---------- Danh mục đối tác (bên bán / bên mua đã lưu) ----------
+
+@app.route("/partners")
+@login_required
+def partner_list():
+    nhom = request.args.get("nhom", "")
+    db = get_db()
+    sql = "SELECT * FROM partners WHERE 1=1"
+    params = []
+    if nhom:
+        sql += " AND nhom = ?"
+        params.append(nhom)
+    sql += " ORDER BY nhom, loai, ten"
+    partners = db.execute(sql, params).fetchall()
+    nhoms = db.execute(
+        "SELECT DISTINCT nhom FROM partners WHERE nhom IS NOT NULL AND nhom != '' ORDER BY nhom"
+    ).fetchall()
+    return render_template("partner_list.html", partners=partners, nhoms=nhoms, nhom=nhom)
+
+
+@app.route("/partners/new", methods=["GET", "POST"])
+@login_required
+def partner_new():
+    if request.method == "POST":
+        f = request.form
+        db = get_db()
+        db.execute(
+            """INSERT INTO partners (loai, nhom, ten, dia_chi, sdt, mst, ghi_chu)
+               VALUES (?,?,?,?,?,?,?)""",
+            (f.get("loai"), f.get("nhom", "").strip(), f.get("ten", "").strip(),
+             f.get("dia_chi", "").strip(), f.get("sdt", "").strip(),
+             f.get("mst", "").strip(), f.get("ghi_chu", "").strip()),
+        )
+        db.commit()
+        flash("Đã lưu đối tác.", "success")
+        return redirect(url_for("partner_list"))
+    return render_template("partner_form.html", partner=None)
+
+
+@app.route("/partners/<int:partner_id>/edit", methods=["GET", "POST"])
+@login_required
+def partner_edit(partner_id):
+    db = get_db()
+    partner = db.execute("SELECT * FROM partners WHERE id=?", (partner_id,)).fetchone()
+    if not partner:
+        flash("Không tìm thấy đối tác.", "danger")
+        return redirect(url_for("partner_list"))
+    if request.method == "POST":
+        f = request.form
+        db.execute(
+            """UPDATE partners SET loai=?, nhom=?, ten=?, dia_chi=?, sdt=?, mst=?, ghi_chu=?
+               WHERE id=?""",
+            (f.get("loai"), f.get("nhom", "").strip(), f.get("ten", "").strip(),
+             f.get("dia_chi", "").strip(), f.get("sdt", "").strip(),
+             f.get("mst", "").strip(), f.get("ghi_chu", "").strip(), partner_id),
+        )
+        db.commit()
+        flash("Đã cập nhật đối tác.", "success")
+        return redirect(url_for("partner_list"))
+    return render_template("partner_form.html", partner=partner)
+
+
+@app.route("/partners/<int:partner_id>/delete", methods=["POST"])
+@login_required
+def partner_delete(partner_id):
+    db = get_db()
+    db.execute("DELETE FROM partners WHERE id=?", (partner_id,))
+    db.commit()
+    flash("Đã xóa đối tác.", "success")
+    return redirect(url_for("partner_list"))
+
+
 # ---------- Tạo hóa đơn bán hàng (in được, nhiều mặt hàng) ----------
 
 @app.route("/sales")
 @login_required
 def sales_list():
+    nhom = request.args.get("nhom", "")
     db = get_db()
-    invoices = db.execute(
-        "SELECT * FROM sales_invoices ORDER BY ngay_lap DESC, id DESC"
+    sql = """SELECT si.*, u.full_name AS nguoi_tao_ten, u.username AS nguoi_tao_username
+             FROM sales_invoices si LEFT JOIN users u ON si.nguoi_tao_id = u.id WHERE 1=1"""
+    params = []
+    if nhom:
+        sql += " AND si.nhom = ?"
+        params.append(nhom)
+    sql += " ORDER BY si.ngay_lap DESC, si.id DESC"
+    invoices = db.execute(sql, params).fetchall()
+    nhoms = db.execute(
+        "SELECT DISTINCT nhom FROM sales_invoices WHERE nhom IS NOT NULL AND nhom != '' ORDER BY nhom"
     ).fetchall()
-    return render_template("sales_list.html", invoices=invoices)
+    return render_template("sales_list.html", invoices=invoices, nhom=nhom, nhoms=nhoms)
 
 
 @app.route("/sales/new", methods=["GET", "POST"])
 @login_required
 def sales_new():
+    db = get_db()
     if request.method == "POST":
         f = request.form
         ten_hang_list = f.getlist("ten_hang[]")
@@ -603,24 +801,31 @@ def sales_new():
                 "thanh_tien": thanh_tien,
             })
 
+        partners_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM partners ORDER BY nhom, loai, ten").fetchall()])
+
         if not items:
             flash("Cần ít nhất 1 mặt hàng.", "danger")
             return render_template(
                 "sales_form.html", invoice=None, items=[],
-                today=datetime.now().strftime("%Y-%m-%d"),
+                today=datetime.now().strftime("%Y-%m-%d"), partners_json=partners_json,
             )
 
-        db = get_db()
+        nhom = f.get("nhom", "").strip()
+        seller_name = f.get("seller_name", "").strip()
+        seller_address = f.get("seller_address", "").strip()
+        seller_phone = f.get("seller_phone", "").strip()
+        buyer_name = f.get("buyer_name", "").strip()
+        buyer_address = f.get("buyer_address", "").strip()
+
         cur = db.execute(
             """INSERT INTO sales_invoices
-               (so_hd, ngay_lap, seller_name, seller_address, seller_phone,
+               (nhom, so_hd, ngay_lap, seller_name, seller_address, seller_phone,
                 buyer_name, buyer_address, tong_cong, nguoi_tao_id)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (
-                f.get("so_hd", "").strip(), f.get("ngay_lap"),
-                f.get("seller_name", "").strip(), f.get("seller_address", "").strip(),
-                f.get("seller_phone", "").strip(), f.get("buyer_name", "").strip(),
-                f.get("buyer_address", "").strip(), tong_cong, current_user.id,
+                nhom, f.get("so_hd", "").strip(), f.get("ngay_lap"),
+                seller_name, seller_address, seller_phone, buyer_name,
+                buyer_address, tong_cong, current_user.id,
             ),
         )
         invoice_id = cur.lastrowid
@@ -632,13 +837,37 @@ def sales_new():
                 (invoice_id, it["stt"], it["ten_hang"], it["quy_cach"], it["dvt"],
                  it["so_luong"], it["don_gia"], it["thanh_tien"]),
             )
+
+        # Lưu đối tác mới vào danh mục nếu được tick và chưa tồn tại
+        if f.get("save_seller") and seller_name:
+            exists = db.execute(
+                "SELECT id FROM partners WHERE loai='seller' AND ten=? AND IFNULL(nhom,'')=?",
+                (seller_name, nhom),
+            ).fetchone()
+            if not exists:
+                db.execute(
+                    "INSERT INTO partners (loai, nhom, ten, dia_chi, sdt) VALUES ('seller',?,?,?,?)",
+                    (nhom, seller_name, seller_address, seller_phone),
+                )
+        if f.get("save_buyer") and buyer_name:
+            exists = db.execute(
+                "SELECT id FROM partners WHERE loai='buyer' AND ten=? AND IFNULL(nhom,'')=?",
+                (buyer_name, nhom),
+            ).fetchone()
+            if not exists:
+                db.execute(
+                    "INSERT INTO partners (loai, nhom, ten, dia_chi) VALUES ('buyer',?,?,?)",
+                    (nhom, buyer_name, buyer_address),
+                )
         db.commit()
+
         flash("Đã tạo hóa đơn bán hàng.", "success")
         return redirect(url_for("sales_view", invoice_id=invoice_id))
 
+    partners_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM partners ORDER BY nhom, loai, ten").fetchall()])
     return render_template(
         "sales_form.html", invoice=None, items=[],
-        today=datetime.now().strftime("%Y-%m-%d"),
+        today=datetime.now().strftime("%Y-%m-%d"), partners_json=partners_json,
     )
 
 
