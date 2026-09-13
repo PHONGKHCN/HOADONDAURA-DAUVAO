@@ -44,7 +44,17 @@
           <td class="small text-muted">{{ inv.nguoi_tao_ten or inv.nguoi_tao_username }}</td>
           <td class="text-center">
             <a href="{{ url_for('sales_view', invoice_id=inv.id) }}" class="btn btn-sm btn-outline-secondary">Xem</a>
-            <a href="{{ url_for('sales_pdf', invoice_id=inv.id) }}" class="btn btn-sm btn-outline-primary">PDF</a>
+            <div class="btn-group">
+              <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown">
+                Xuất file
+              </button>
+              <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="{{ url_for('sales_pdf', invoice_id=inv.id, size='a4') }}">PDF - Khổ A4</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('sales_pdf', invoice_id=inv.id, size='a5') }}">PDF - Khổ A5</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('sales_docx', invoice_id=inv.id, size='a4') }}">Word - Khổ A4</a></li>
+                <li><a class="dropdown-item" href="{{ url_for('sales_docx', invoice_id=inv.id, size='a5') }}">Word - Khổ A5</a></li>
+              </ul>
+            </div>
             <form method="post" action="{{ url_for('sales_delete', invoice_id=inv.id) }}" class="d-inline"
                   onsubmit="return confirm('Xóa hóa đơn này?');">
               <button type="submit" class="btn btn-sm btn-outline-danger">Xóa</button>

@@ -33,11 +33,12 @@
   </div>
   <div class="row align-items-end mb-3">
     <div class="col-md-6">
-      <label class="form-label small text-muted">Hoặc tự tính giá bán từ giá mua (% lãi mong muốn)</label>
+      <label class="form-label small text-muted">% lãi mong muốn (dùng để tính giá còn thiếu)</label>
       <input type="number" step="any" id="markupPercent" class="form-control form-control-sm" placeholder="VD: 10">
     </div>
     <div class="col-md-6">
-      <button type="button" class="btn btn-outline-primary btn-sm" onclick="tinhGiaBan()">Tính giá bán</button>
+      <button type="button" class="btn btn-outline-primary btn-sm" onclick="tinhGiaBan()">Tính giá bán từ giá mua</button>
+      <button type="button" class="btn btn-outline-primary btn-sm" onclick="tinhGiaMua()">Tính giá mua từ giá bán</button>
     </div>
   </div>
   <div class="mb-3">
@@ -58,6 +59,17 @@ function tinhGiaBan() {
   }
   const giaBan = Math.round(giaMua * (1 + percent / 100));
   document.getElementById("giaBan").value = giaBan;
+}
+
+function tinhGiaMua() {
+  const giaBan = parseFloat(document.getElementById("giaBan").value) || 0;
+  const percent = parseFloat(document.getElementById("markupPercent").value) || 0;
+  if (giaBan <= 0) {
+    alert("Nhập Giá bán trước đã.");
+    return;
+  }
+  const giaMua = Math.round(giaBan / (1 + percent / 100));
+  document.getElementById("giaMua").value = giaMua;
 }
 </script>
 {% endblock %}

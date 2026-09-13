@@ -23,7 +23,7 @@
         <input type="file" name="excel_file" accept=".xlsx,.xlsm,.xls" class="form-control" required>
       </div>
       <div class="col-md-2">
-        <label class="form-label">Giá trong file này là</label>
+        <label class="form-label">Nếu file chỉ có 1 cột giá, đó là</label>
         <select name="loai_gia" id="loaiGiaUpload" class="form-select" onchange="toggleMarkupUpload()">
           <option value="gia_ban">Giá bán</option>
           <option value="gia_mua">Giá mua</option>
@@ -33,15 +33,16 @@
         <label class="form-label">Nhóm/Khách hàng</label>
         <input type="text" name="default_nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD">
       </div>
-      <div class="col-md-3" id="markupUploadBox" style="display:none;">
-        <label class="form-label small">Tự tính giá bán (+% lãi)</label>
+      <div class="col-md-3" id="markupUploadBox">
+        <label class="form-label small" id="markupUploadLabel">Tự tính giá mua (theo % lãi giả định)</label>
         <input type="number" step="any" name="markup_percent" class="form-control" placeholder="VD: 10">
       </div>
     </div>
     <div class="small text-muted mt-2">
-      💡 Nếu bạn có 2 file riêng (1 file giá bán, 1 file giá mua) — tải lần lượt từng file,
-      chọn đúng loại giá mỗi lần. Sản phẩm trùng tên (cùng Nhóm) sẽ được cập nhật thêm giá, không tạo trùng dòng mới.
-      Nếu chỉ có file giá mua, điền % lãi mong muốn để hệ thống tự tính luôn giá bán (chỉ áp dụng cho sản phẩm chưa có giá bán).
+      💡 Nếu file có sẵn 2 cột riêng "Giá bán" và "Giá mua" — hệ thống tự đọc đúng cả 2, không cần
+      quan tâm lựa chọn ở trên. Lựa chọn "Nếu file chỉ có 1 cột giá" chỉ áp dụng khi file chỉ có
+      một cột giá chung (VD: "Đơn giá"). Sản phẩm trùng tên (cùng Nhóm) sẽ được cập nhật thêm giá,
+      không tạo trùng dòng mới. Điền % lãi nếu muốn tự tính giá còn thiếu.
     </div>
     <button type="submit" class="btn btn-primary mt-3">⬆ Tải lên và nhập</button>
   </form>
@@ -67,7 +68,7 @@
       <input type="text" name="default_nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD">
     </div>
     <div class="mb-3">
-      <label class="form-label small">Nếu dòng nào chỉ có Giá mua, thiếu Giá bán — tự tính bằng (% lãi mong muốn)</label>
+      <label class="form-label small">Nếu dòng nào chỉ có 1 trong 2 giá (Giá bán hoặc Giá mua) — tự tính giá còn thiếu theo (% lãi mong muốn)</label>
       <input type="number" step="any" name="markup_percent" class="form-control" placeholder="Để trống nếu không cần tự tính" style="max-width:220px;">
     </div>
 
@@ -87,7 +88,11 @@ Thep Hoa Phat Φ6&#9;Cay 11.7m&#9;Cay&#9;98000&#9;94000"></textarea>
 <script>
 function toggleMarkupUpload() {
   const loai = document.getElementById("loaiGiaUpload").value;
-  document.getElementById("markupUploadBox").style.display = (loai === "gia_mua") ? "block" : "none";
+  const label = document.getElementById("markupUploadLabel");
+  label.textContent = (loai === "gia_mua")
+    ? "Tự tính giá bán (+% lãi)"
+    : "Tự tính giá mua (theo % lãi giả định)";
 }
+toggleMarkupUpload();
 </script>
 {% endblock %}

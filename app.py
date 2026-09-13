@@ -14,18 +14,25 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, A5
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
+    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepTogether,
 )
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 from vn_number_to_words import so_thanh_chu
+
+from docx import Document as DocxDocument
+from docx.shared import Mm, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "hoadon.db")
 
@@ -156,6 +163,14 @@ def init_db():
         cols = [r["name"] for r in db.execute(f"PRAGMA table_info({table})").fetchall()]
         if "nhom" not in cols:
             db.execute(f"ALTER TABLE {table} ADD COLUMN nhom TEXT")
+    db.commit()
+
+    # Migration: thêm các cột mới cho mẫu "Hóa đơn bán lẻ" (số điện thoại người mua,
+    # địa điểm lập hóa đơn, dòng mô tả nhỏ dưới tên bên bán)
+    sales_cols = [r["name"] for r in db.execute("PRAGMA table_info(sales_invoices)").fetchall()]
+    for col in ("buyer_phone", "dia_diem", "seller_slogan"):
+        if col not in sales_cols:
+            db.execute(f"ALTER TABLE sales_invoices ADD COLUMN {col} TEXT")
     db.commit()
 
     # Seed one admin account if no users exist yet
@@ -876,7 +891,9 @@ def product_delete(product_id):
 
 def extract_products_from_excel(file_stream):
     """Đọc file Excel bất kỳ, tự tìm dòng tiêu đề và nhận diện cột theo từ khóa tiếng Việt.
-    Trả về list dict {ten, quy_cach, dvt, gia}."""
+    Nhận diện cả trường hợp có 2 cột giá riêng (Giá bán / Giá mua) lẫn 1 cột giá chung (Đơn giá).
+    Trả về list dict {ten, quy_cach, dvt, gia_ban, gia_mua} — gia_ban/gia_mua là None nếu
+    cột đó không có trong file (để phân biệt với "có cột nhưng giá trị bằng 0")."""
     wb = load_workbook(file_stream, data_only=True)
     results = []
 
@@ -904,14 +921,24 @@ def extract_products_from_excel(file_stream):
                         col_map["ten"] = col_idx
                     elif "quy cách" in low:
                         col_map["quy_cach"] = col_idx
+                    elif "giá bán" in low:
+                        col_map["gia_ban"] = col_idx
+                    elif "giá mua" in low:
+                        col_map["gia_mua"] = col_idx
                     elif "đơn giá" in low or low.strip() == "giá":
-                        col_map["gia"] = col_idx
+                        col_map["gia_chung"] = col_idx
                     elif "đơn vị" in low or "đvt" in low:
                         col_map["dvt"] = col_idx
                 break
 
         if not header_row_idx or "ten" not in col_map:
             continue  # sheet này không phải danh mục sản phẩm, bỏ qua
+
+        def _to_float(raw):
+            try:
+                return float(raw) if raw else 0
+            except (ValueError, TypeError):
+                return 0
 
         for row in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
             if col_map["ten"] >= len(row):
@@ -921,15 +948,14 @@ def extract_products_from_excel(file_stream):
                 continue
             quy_cach = row[col_map["quy_cach"]] if "quy_cach" in col_map and col_map["quy_cach"] < len(row) else ""
             dvt = row[col_map["dvt"]] if "dvt" in col_map and col_map["dvt"] < len(row) else ""
-            gia_raw = row[col_map["gia"]] if "gia" in col_map and col_map["gia"] < len(row) else 0
-            try:
-                gia = float(gia_raw) if gia_raw else 0
-            except (ValueError, TypeError):
-                gia = 0
+
+            gia_ban = _to_float(row[col_map["gia_ban"]]) if "gia_ban" in col_map and col_map["gia_ban"] < len(row) else None
+            gia_mua = _to_float(row[col_map["gia_mua"]]) if "gia_mua" in col_map and col_map["gia_mua"] < len(row) else None
+            gia_chung = _to_float(row[col_map["gia_chung"]]) if "gia_chung" in col_map and col_map["gia_chung"] < len(row) else None
 
             # Bỏ qua các dòng "rác" như nhãn chữ ký/tổng cộng vô tình rơi đúng cột tên hàng
-            # (một dòng sản phẩm thật luôn có ít nhất 1 trong 3: quy cách/ĐVT/giá)
-            if not quy_cach and not dvt and not gia:
+            # (một dòng sản phẩm thật luôn có ít nhất 1 trong: quy cách/ĐVT/giá)
+            if not quy_cach and not dvt and not gia_ban and not gia_mua and not gia_chung:
                 continue
             if ten.strip().lower() in ("khách hàng", "người bán", "tổng cộng", "thành tiền", "ghi chú"):
                 continue
@@ -938,7 +964,9 @@ def extract_products_from_excel(file_stream):
                 "ten": str(ten).strip(),
                 "quy_cach": str(quy_cach).strip() if quy_cach else "",
                 "dvt": str(dvt).strip() if dvt else "",
-                "gia": gia,
+                "gia_ban": gia_ban,
+                "gia_mua": gia_mua,
+                "gia_chung": gia_chung,
             })
 
     return results
@@ -971,40 +999,58 @@ def product_import_excel():
         return redirect(url_for("product_bulk"))
 
     db = get_db()
-    created, updated = 0, 0
+    created, updated, both_found = 0, 0, 0
     for r in rows:
-        # Nếu đang nhập giá mua và có đặt % lãi mong muốn, tự tính luôn giá bán tương ứng
-        auto_gia_ban = None
-        if loai_gia == "gia_mua" and markup_percent:
-            auto_gia_ban = round(r["gia"] * (1 + markup_percent / 100))
+        # Ưu tiên cột giá RIÊNG nếu file có ("Giá bán"/"Giá mua" tách biệt).
+        # Chỉ dùng cột giá CHUNG ("Đơn giá") + lựa chọn loai_gia khi file không có cột riêng.
+        row_gia_ban = r["gia_ban"]
+        row_gia_mua = r["gia_mua"]
+        if row_gia_ban is None and row_gia_mua is None and r["gia_chung"] is not None:
+            if loai_gia == "gia_ban":
+                row_gia_ban = r["gia_chung"]
+            else:
+                row_gia_mua = r["gia_chung"]
+
+        if row_gia_ban is not None and row_gia_mua is not None:
+            both_found += 1
+
+        # Tự tính giá còn thiếu theo % lãi mong muốn (2 chiều)
+        if markup_percent:
+            if row_gia_ban is None and row_gia_mua is not None:
+                row_gia_ban = round(row_gia_mua * (1 + markup_percent / 100))
+            elif row_gia_mua is None and row_gia_ban is not None:
+                row_gia_mua = round(row_gia_ban / (1 + markup_percent / 100))
 
         existing = db.execute(
             "SELECT * FROM products WHERE ten = ? AND IFNULL(nhom,'') = ?",
             (r["ten"], default_nhom),
         ).fetchone()
         if existing:
-            db.execute(f"UPDATE products SET {loai_gia} = ? WHERE id = ?", (r["gia"], existing["id"]))
+            # Chỉ ghi giá nếu file THỰC SỰ có giá trị cho cột đó và ô hiện tại đang trống
+            # (không ghi đè giá đã nhập tay từ trước)
+            if row_gia_ban is not None and not existing["gia_ban"]:
+                db.execute("UPDATE products SET gia_ban = ? WHERE id = ?", (row_gia_ban, existing["id"]))
+            if row_gia_mua is not None and not existing["gia_mua"]:
+                db.execute("UPDATE products SET gia_mua = ? WHERE id = ?", (row_gia_mua, existing["id"]))
             if not existing["quy_cach"] and r["quy_cach"]:
                 db.execute("UPDATE products SET quy_cach = ? WHERE id = ?", (r["quy_cach"], existing["id"]))
             if not existing["dvt"] and r["dvt"]:
                 db.execute("UPDATE products SET dvt = ? WHERE id = ?", (r["dvt"], existing["id"]))
-            # Chỉ tự điền giá bán nếu sản phẩm CHƯA có giá bán từ trước (không ghi đè giá đã nhập tay)
-            if auto_gia_ban is not None and not existing["gia_ban"]:
-                db.execute("UPDATE products SET gia_ban = ? WHERE id = ?", (auto_gia_ban, existing["id"]))
             updated += 1
         else:
-            gia_ban_val = auto_gia_ban if (loai_gia == "gia_mua" and auto_gia_ban is not None) else (r["gia"] if loai_gia == "gia_ban" else 0)
-            gia_mua_val = r["gia"] if loai_gia == "gia_mua" else 0
             db.execute(
                 "INSERT INTO products (nhom, ten, quy_cach, dvt, gia_ban, gia_mua) VALUES (?,?,?,?,?,?)",
-                (default_nhom, r["ten"], r["quy_cach"], r["dvt"], gia_ban_val, gia_mua_val),
+                (default_nhom, r["ten"], r["quy_cach"], r["dvt"], row_gia_ban or 0, row_gia_mua or 0),
             )
             created += 1
     db.commit()
 
-    msg = f"Đã thêm {created} sản phẩm mới, cập nhật {updated} sản phẩm đã có ({'giá bán' if loai_gia=='gia_ban' else 'giá mua'})."
-    if loai_gia == "gia_mua" and markup_percent:
-        msg += f" Đã tự tính giá bán = giá mua + {markup_percent:g}% cho các sản phẩm chưa có giá bán."
+    if both_found == len(rows) and both_found > 0:
+        msg = f"Đã thêm {created} sản phẩm mới, cập nhật {updated} sản phẩm đã có — đọc được cả Giá bán và Giá mua từ file."
+    else:
+        msg = f"Đã thêm {created} sản phẩm mới, cập nhật {updated} sản phẩm đã có."
+        if markup_percent:
+            msg += " Đã tự tính giá còn thiếu (nếu có) theo % lãi đã nhập."
     flash(msg, "success")
     return redirect(url_for("product_list"))
 
@@ -1037,9 +1083,11 @@ def product_bulk():
                 gia_mua = float(re.sub(r"[^\d.\-]", "", (cols[4] if len(cols) > 4 else "0").replace(",", "")) or 0)
                 ghi_chu = cols[5] if len(cols) > 5 else ""
 
-                # Chưa có giá bán nhưng có giá mua + đặt % lãi -> tự tính giá bán
+                # Tự tính giá còn thiếu theo % lãi mong muốn (2 chiều)
                 if not gia_ban and gia_mua and markup_percent:
                     gia_ban = round(gia_mua * (1 + markup_percent / 100))
+                elif not gia_mua and gia_ban and markup_percent:
+                    gia_mua = round(gia_ban / (1 + markup_percent / 100))
 
                 db.execute(
                     """INSERT INTO products (nhom, ten, quy_cach, dvt, gia_ban, gia_mua, ghi_chu)
@@ -1297,20 +1345,21 @@ def sales_new():
 
         nhom = f.get("nhom", "").strip()
         seller_name = f.get("seller_name", "").strip()
-        seller_address = f.get("seller_address", "").strip()
-        seller_phone = f.get("seller_phone", "").strip()
+        seller_slogan = f.get("seller_slogan", "").strip()
         buyer_name = f.get("buyer_name", "").strip()
         buyer_address = f.get("buyer_address", "").strip()
+        buyer_phone = f.get("buyer_phone", "").strip()
+        dia_diem = f.get("dia_diem", "").strip()
 
         cur = db.execute(
             """INSERT INTO sales_invoices
-               (nhom, so_hd, ngay_lap, seller_name, seller_address, seller_phone,
-                buyer_name, buyer_address, tong_cong, nguoi_tao_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+               (nhom, so_hd, ngay_lap, seller_name, seller_slogan,
+                buyer_name, buyer_address, buyer_phone, dia_diem, tong_cong, nguoi_tao_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 nhom, f.get("so_hd", "").strip(), f.get("ngay_lap"),
-                seller_name, seller_address, seller_phone, buyer_name,
-                buyer_address, tong_cong, current_user.id,
+                seller_name, seller_slogan, buyer_name,
+                buyer_address, buyer_phone, dia_diem, tong_cong, current_user.id,
             ),
         )
         invoice_id = cur.lastrowid
@@ -1331,8 +1380,8 @@ def sales_new():
             ).fetchone()
             if not exists:
                 db.execute(
-                    "INSERT INTO partners (loai, nhom, ten, dia_chi, sdt) VALUES ('seller',?,?,?,?)",
-                    (nhom, seller_name, seller_address, seller_phone),
+                    "INSERT INTO partners (loai, nhom, ten) VALUES ('seller',?,?)",
+                    (nhom, seller_name),
                 )
         if f.get("save_buyer") and buyer_name:
             exists = db.execute(
@@ -1341,12 +1390,12 @@ def sales_new():
             ).fetchone()
             if not exists:
                 db.execute(
-                    "INSERT INTO partners (loai, nhom, ten, dia_chi) VALUES ('buyer',?,?,?)",
-                    (nhom, buyer_name, buyer_address),
+                    "INSERT INTO partners (loai, nhom, ten, dia_chi, sdt) VALUES ('buyer',?,?,?,?)",
+                    (nhom, buyer_name, buyer_address, buyer_phone),
                 )
         db.commit()
 
-        flash("Đã tạo hóa đơn bán hàng.", "success")
+        flash("Đã tạo hóa đơn bán lẻ.", "success")
         return redirect(url_for("sales_view", invoice_id=invoice_id))
 
     partners_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM partners ORDER BY nhom, loai, ten").fetchall()])
@@ -1386,106 +1435,327 @@ def sales_delete(invoice_id):
     return redirect(url_for("sales_list"))
 
 
-def build_sales_invoice_pdf(invoice, items):
+def build_sales_invoice_pdf(invoice, items, page_size="a4"):
+    is_a5 = page_size.lower() == "a5"
     buf = BytesIO()
     doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        topMargin=15 * mm, bottomMargin=15 * mm,
-        leftMargin=15 * mm, rightMargin=15 * mm,
+        buf, pagesize=A5 if is_a5 else A4,
+        topMargin=(10 if is_a5 else 15) * mm, bottomMargin=(10 if is_a5 else 15) * mm,
+        leftMargin=(10 if is_a5 else 15) * mm, rightMargin=(10 if is_a5 else 15) * mm,
     )
 
-    style_normal = ParagraphStyle("normal", fontName="VNSans", fontSize=10, leading=13)
-    style_bold = ParagraphStyle("bold", fontName="VNSans-Bold", fontSize=11, leading=14)
+    fs = 0.8 if is_a5 else 1.0  # hệ số thu nhỏ cỡ chữ cho khổ A5
+
+    style_normal = ParagraphStyle("normal", fontName="VNSans", fontSize=10 * fs, leading=13 * fs)
+    style_bold = ParagraphStyle("bold", fontName="VNSans-Bold", fontSize=12 * fs, leading=15 * fs)
+    style_slogan = ParagraphStyle("slogan", fontName="VNSans", fontSize=9 * fs, leading=12 * fs)
     style_title = ParagraphStyle(
-        "title", fontName="VNSans-Bold", fontSize=16, leading=20, alignment=TA_CENTER,
+        "title", fontName="VNSans-Bold", fontSize=16 * fs, leading=20 * fs, alignment=TA_CENTER,
         spaceAfter=4,
     )
-    style_center = ParagraphStyle("center", fontName="VNSans", fontSize=10, alignment=TA_CENTER)
-    style_right = ParagraphStyle("right", fontName="VNSans", fontSize=10, alignment=TA_RIGHT)
-    style_cell = ParagraphStyle("cell", fontName="VNSans", fontSize=9, leading=11)
-    style_cell_bold = ParagraphStyle("cell_bold", fontName="VNSans-Bold", fontSize=9, leading=11)
+    style_quochieu = ParagraphStyle(
+        "quochieu", fontName="VNSans-Bold", fontSize=11 * fs, leading=14 * fs, alignment=TA_CENTER,
+    )
+    style_center = ParagraphStyle("center", fontName="VNSans", fontSize=10 * fs, alignment=TA_CENTER)
+    style_right = ParagraphStyle("right", fontName="VNSans", fontSize=10 * fs, alignment=TA_RIGHT)
+    style_cell = ParagraphStyle("cell", fontName="VNSans", fontSize=(8 if is_a5 else 9), leading=(10 if is_a5 else 11))
+    style_cell_bold = ParagraphStyle("cell_bold", fontName="VNSans-Bold", fontSize=(8 if is_a5 else 9), leading=(10 if is_a5 else 11))
+    style_cell_center = ParagraphStyle("cell_center", parent=style_cell, alignment=TA_CENTER)
+    style_cell_right = ParagraphStyle("cell_right", parent=style_cell, alignment=TA_RIGHT)
+    style_cell_bold_center = ParagraphStyle("cell_bold_center", parent=style_cell_bold, alignment=TA_CENTER)
+    style_cell_bold_right = ParagraphStyle("cell_bold_right", parent=style_cell_bold, alignment=TA_RIGHT)
+    style_red = ParagraphStyle("red", fontName="VNSans-Bold", fontSize=10 * fs, textColor=colors.HexColor("#C00000"))
 
     story = []
 
-    story.append(Paragraph(invoice["seller_name"] or "", style_bold))
-    if invoice["seller_address"]:
-        story.append(Paragraph(f"Địa chỉ: {invoice['seller_address']}", style_normal))
-    if invoice["seller_phone"]:
-        story.append(Paragraph(f"Điện thoại: {invoice['seller_phone']}", style_normal))
-    story.append(Spacer(1, 8))
+    left_w = 75 * mm if is_a5 else 85 * mm
+    right_w = 55 * mm if is_a5 else 85 * mm
 
-    story.append(Paragraph("HÓA ĐƠN BÁN HÀNG", style_title))
+    left_cell = [Paragraph(f"CƠ SỞ {invoice['seller_name'] or ''}".upper(), style_bold)]
+    if invoice["seller_slogan"]:
+        left_cell.append(Paragraph(invoice["seller_slogan"], style_slogan))
+    right_cell = [
+        Paragraph("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", style_quochieu),
+        Paragraph("<u>Độc lập – Tự do – Hạnh Phúc</u>", style_quochieu),
+    ]
+    header_table = Table([[left_cell, right_cell]], colWidths=[left_w, right_w])
+    header_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 10 if is_a5 else 14))
+
+    story.append(Paragraph("HÓA ĐƠN BÁN LẺ", style_title))
     if invoice["so_hd"]:
         story.append(Paragraph(f"Số: {invoice['so_hd']}", style_center))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8 if is_a5 else 10))
 
-    story.append(Paragraph(f"Khách hàng: {invoice['buyer_name']}", style_normal))
-    if invoice["buyer_address"]:
-        story.append(Paragraph(f"Địa chỉ: {invoice['buyer_address']}", style_normal))
-    story.append(Spacer(1, 10))
+    story.append(Paragraph(f"- Họ và tên người nhận hàng: {invoice['buyer_name']}", style_normal))
+    story.append(Paragraph(f"- Địa chỉ: {invoice['buyer_address'] or ''}", style_normal))
+    story.append(Paragraph(f"- Số điện thoại: {invoice['buyer_phone'] or ''}", style_normal))
+    story.append(Spacer(1, 4))
 
-    header = ["STT", "Tên hàng", "Quy cách\nsản phẩm", "ĐVT", "Số\nlượng", "Đơn giá", "Thành tiền"]
-    table_data = [[Paragraph(h.replace("\n", "<br/>"), style_cell_bold) for h in header]]
+    dvt_para = Paragraph("<i>ĐVT: Đồng</i>", style_right)
+    story.append(dvt_para)
+    story.append(Spacer(1, 2))
 
+    header = ["STT", "Tên hàng", "ĐVT", "Đơn giá", "Số lượng", "Thành tiền"]
+    header_styles = [style_cell_bold_center, style_cell_bold, style_cell_bold_center,
+                      style_cell_bold_right, style_cell_bold_right, style_cell_bold_right]
+    table_data = [[Paragraph(h, st) for h, st in zip(header, header_styles)]]
+
+    tong_so_luong = 0
     for it in items:
+        tong_so_luong += it["so_luong"]
+        sl_str = f"{it['so_luong']:,.0f}" if it["so_luong"] % 1 == 0 else f"{it['so_luong']:,.2f}"
         table_data.append([
-            Paragraph(str(it["stt"]), style_cell),
+            Paragraph(str(it["stt"]), style_cell_center),
             Paragraph(it["ten_hang"], style_cell),
-            Paragraph(it["quy_cach"] or "", style_cell),
-            Paragraph(it["dvt"] or "", style_cell),
-            Paragraph(f"{it['so_luong']:,.0f}".rstrip("0").rstrip(".") if it["so_luong"] % 1 else f"{it['so_luong']:,.0f}", style_cell),
-            Paragraph(f"{it['don_gia']:,.0f}", style_cell),
-            Paragraph(f"{it['thanh_tien']:,.0f}", style_cell),
+            Paragraph(it["dvt"] or "", style_cell_center),
+            Paragraph(f"{it['don_gia']:,.0f}", style_cell_right),
+            Paragraph(sl_str, style_cell_right),
+            Paragraph(f"{it['thanh_tien']:,.0f}", style_cell_right),
         ])
 
+    tong_sl_str = f"{tong_so_luong:,.0f}" if tong_so_luong % 1 == 0 else f"{tong_so_luong:,.2f}"
     table_data.append([
-        Paragraph("", style_cell), Paragraph("", style_cell), Paragraph("", style_cell),
-        Paragraph("", style_cell), Paragraph("", style_cell),
-        Paragraph("TỔNG CỘNG", style_cell_bold),
-        Paragraph(f"{invoice['tong_cong']:,.0f}", style_cell_bold),
+        Paragraph("", style_cell), Paragraph("Tổng cộng", style_cell_bold), Paragraph("", style_cell),
+        Paragraph("", style_cell),
+        Paragraph(tong_sl_str, style_cell_bold_right),
+        Paragraph(f"{invoice['tong_cong']:,.0f}", style_cell_bold_right),
     ])
 
-    col_widths = [12*mm, 45*mm, 28*mm, 15*mm, 18*mm, 25*mm, 27*mm]
+    if is_a5:
+        col_widths = [13 * mm, 35 * mm, 13 * mm, 21 * mm, 15 * mm, 25 * mm]
+    else:
+        col_widths = [12 * mm, 50 * mm, 18 * mm, 30 * mm, 25 * mm, 35 * mm]
     tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
     tbl.setStyle(TableStyle([
-        ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#666666")),
+        ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#333333")),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2E5266")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ALIGN", (0, 0), (0, -1), "CENTER"),
-        ("ALIGN", (3, 0), (4, -1), "CENTER"),
-        ("ALIGN", (5, 0), (6, -1), "RIGHT"),
-        ("SPAN", (0, -1), (4, -1)),
+        ("ALIGN", (2, 0), (2, -1), "CENTER"),
+        ("ALIGN", (3, 0), (5, -1), "RIGHT"),
         ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#D6E4F0")),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3 if is_a5 else 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3 if is_a5 else 4),
     ]))
     story.append(tbl)
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 8 if is_a5 else 10))
 
     so_chu = so_thanh_chu(invoice["tong_cong"])
-    story.append(Paragraph(f"Thành tiền (bằng chữ): <i>{so_chu}</i>", style_normal))
-    story.append(Spacer(1, 4))
+    footer_block = []
+    footer_block.append(Paragraph(
+        f"Thành tiền: {invoice['tong_cong']:,.0f} đồng (Bằng chữ: <i>{so_chu.rstrip('.')}</i>).",
+        style_red,
+    ))
+    footer_block.append(Spacer(1, 6 if is_a5 else 8))
+
     ngay_str = invoice["ngay_lap"]
     try:
         d = datetime.strptime(ngay_str, "%Y-%m-%d")
-        ngay_str = f"Ngày {d.day} tháng {d.month} năm {d.year}"
+        ngay_phrase = f"ngày {d.day} tháng {d.month} năm {d.year}"
     except Exception:
-        pass
-    story.append(Paragraph(ngay_str, style_right))
-    story.append(Spacer(1, 20))
+        ngay_phrase = ngay_str
+    dia_diem = invoice["dia_diem"] or ""
+    dòng_ngay = f"{dia_diem}, {ngay_phrase}" if dia_diem else ngay_phrase.capitalize()
+    footer_block.append(Paragraph(dòng_ngay, style_right))
+    footer_block.append(Spacer(1, 16 if is_a5 else 20))
 
     sig_table = Table(
-        [[Paragraph("Khách hàng", style_center), Paragraph("Người bán", style_center)],
-         [Paragraph("(Ký, ghi rõ họ tên)", style_center), Paragraph("(Ký, ghi rõ họ tên)", style_center)]],
-        colWidths=[85 * mm, 85 * mm],
+        [[Paragraph("Khách hàng", style_center), Paragraph("Người bán hàng", style_center)]],
+        colWidths=[left_w, right_w],
     )
-    sig_table.setStyle(TableStyle([
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-    ]))
-    story.append(sig_table)
+    footer_block.append(sig_table)
+
+    story.append(KeepTogether(footer_block))
 
     doc.build(story)
+    buf.seek(0)
+    return buf
+
+
+# ---------- Word export (.docx) khổ A4/A5 ----------
+
+def _set_cell_shading(cell, hex_color):
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), hex_color)
+    cell._tc.get_or_add_tcPr().append(shd)
+
+
+def _set_run(paragraph, text, bold=False, size=11, color=None, italic=False, underline=False):
+    run = paragraph.add_run(text)
+    run.bold = bold
+    run.italic = italic
+    run.underline = underline
+    run.font.size = Pt(size)
+    run.font.name = "Times New Roman"
+    if color:
+        run.font.color.rgb = RGBColor.from_string(color)
+    return run
+
+
+def build_sales_invoice_docx(invoice, items, page_size="a4"):
+    is_a5 = page_size.lower() == "a5"
+    docx_doc = DocxDocument()
+
+    section = docx_doc.sections[0]
+    if is_a5:
+        section.page_width = Mm(148)
+        section.page_height = Mm(210)
+        margin = Mm(12)
+    else:
+        section.page_width = Mm(210)
+        section.page_height = Mm(297)
+        margin = Mm(18)
+    section.top_margin = margin
+    section.bottom_margin = margin
+    section.left_margin = margin
+    section.right_margin = margin
+
+    fs = 9 if is_a5 else 11
+    fs_title = 15 if is_a5 else 18
+    fs_cell = 8 if is_a5 else 10
+
+    # Header: bảng 1 dòng 2 cột — trái tên cơ sở, phải quốc hiệu
+    header_table = docx_doc.add_table(rows=1, cols=2)
+    header_table.autofit = False
+    header_w = Mm(148 - 24) if is_a5 else Mm(210 - 36)
+    left_w_docx = Mm((148 - 24) * 0.55) if is_a5 else Mm((210 - 36) * 0.55)
+    right_w_docx = Mm((148 - 24) * 0.45) if is_a5 else Mm((210 - 36) * 0.45)
+    header_table.columns[0].width = left_w_docx
+    header_table.columns[1].width = right_w_docx
+    left_cell, right_cell = header_table.rows[0].cells
+    left_cell.width = left_w_docx
+    right_cell.width = right_w_docx
+
+    p1 = left_cell.paragraphs[0]
+    _set_run(p1, f"CƠ SỞ {(invoice['seller_name'] or '').upper()}", bold=True, size=fs + 1)
+    if invoice["seller_slogan"]:
+        p1b = left_cell.add_paragraph()
+        _set_run(p1b, invoice["seller_slogan"], size=fs - 1)
+
+    p2 = right_cell.paragraphs[0]
+    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_run(p2, "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", bold=True, size=fs)
+    p3 = right_cell.add_paragraph()
+    p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_run(p3, "Độc lập – Tự do – Hạnh Phúc", bold=True, size=fs, underline=True)
+
+    docx_doc.add_paragraph()
+
+    p_title = docx_doc.add_paragraph()
+    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_run(p_title, "HÓA ĐƠN BÁN LẺ", bold=True, size=fs_title)
+
+    if invoice["so_hd"]:
+        p_so = docx_doc.add_paragraph()
+        p_so.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_run(p_so, f"Số: {invoice['so_hd']}", size=fs)
+
+    docx_doc.add_paragraph()
+
+    for line in (
+        f"- Họ và tên người nhận hàng: {invoice['buyer_name']}",
+        f"- Địa chỉ: {invoice['buyer_address'] or ''}",
+        f"- Số điện thoại: {invoice['buyer_phone'] or ''}",
+    ):
+        pb = docx_doc.add_paragraph()
+        _set_run(pb, line, size=fs)
+
+    p_dvt = docx_doc.add_paragraph()
+    p_dvt.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    _set_run(p_dvt, "ĐVT: Đồng", italic=True, size=fs - 1)
+
+    headers = ["STT", "Tên hàng", "ĐVT", "Đơn giá", "Số lượng", "Thành tiền"]
+    table = docx_doc.add_table(rows=1, cols=len(headers))
+    table.style = "Table Grid"
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    # Cho dòng tiêu đề tự lặp lại ở đầu mỗi trang khi bảng dài nhiều trang
+    header_row = table.rows[0]
+    trPr = header_row._tr.get_or_add_trPr()
+    tblHeader = OxmlElement("w:tblHeader")
+    tblHeader.set(qn("w:val"), "true")
+    trPr.append(tblHeader)
+
+    for i, h in enumerate(headers):
+        cell = table.rows[0].cells[i]
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_run(cell.paragraphs[0], h, bold=True, size=fs_cell, color="FFFFFF")
+        _set_cell_shading(cell, "2E5266")
+
+    tong_so_luong = 0
+    for it in items:
+        tong_so_luong += it["so_luong"]
+        sl_str = f"{it['so_luong']:,.0f}" if it["so_luong"] % 1 == 0 else f"{it['so_luong']:,.2f}"
+        row = table.add_row().cells
+        values = [str(it["stt"]), it["ten_hang"], it["dvt"] or "",
+                  f"{it['don_gia']:,.0f}", sl_str, f"{it['thanh_tien']:,.0f}"]
+        aligns = [WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER,
+                  WD_ALIGN_PARAGRAPH.RIGHT, WD_ALIGN_PARAGRAPH.RIGHT, WD_ALIGN_PARAGRAPH.RIGHT]
+        for i, val in enumerate(values):
+            row[i].paragraphs[0].alignment = aligns[i]
+            _set_run(row[i].paragraphs[0], val, size=fs_cell)
+
+    tong_sl_str = f"{tong_so_luong:,.0f}" if tong_so_luong % 1 == 0 else f"{tong_so_luong:,.2f}"
+    total_row = table.add_row().cells
+    total_values = ["", "Tổng cộng", "", "", tong_sl_str, f"{invoice['tong_cong']:,.0f}"]
+    total_aligns = [WD_ALIGN_PARAGRAPH.CENTER, WD_ALIGN_PARAGRAPH.LEFT, WD_ALIGN_PARAGRAPH.CENTER,
+                     WD_ALIGN_PARAGRAPH.RIGHT, WD_ALIGN_PARAGRAPH.RIGHT, WD_ALIGN_PARAGRAPH.RIGHT]
+    for i, val in enumerate(total_values):
+        total_row[i].paragraphs[0].alignment = total_aligns[i]
+        _set_run(total_row[i].paragraphs[0], val, bold=True, size=fs_cell)
+        _set_cell_shading(total_row[i], "D6E4F0")
+
+    docx_doc.add_paragraph()
+    so_chu = so_thanh_chu(invoice["tong_cong"])
+    p_total = docx_doc.add_paragraph()
+    p_total.paragraph_format.keep_with_next = True
+    _set_run(
+        p_total,
+        f"Thành tiền: {invoice['tong_cong']:,.0f} đồng (Bằng chữ: {so_chu.rstrip('.')}).",
+        bold=True, size=fs, color="C00000",
+    )
+
+    ngay_str = invoice["ngay_lap"]
+    try:
+        d = datetime.strptime(ngay_str, "%Y-%m-%d")
+        ngay_phrase = f"ngày {d.day} tháng {d.month} năm {d.year}"
+    except Exception:
+        ngay_phrase = ngay_str
+    dia_diem = invoice["dia_diem"] or ""
+    dòng_ngay = f"{dia_diem}, {ngay_phrase}" if dia_diem else ngay_phrase.capitalize()
+    p_ngay = docx_doc.add_paragraph()
+    p_ngay.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p_ngay.paragraph_format.keep_with_next = True
+    _set_run(p_ngay, dòng_ngay, size=fs)
+
+    p_spacer1 = docx_doc.add_paragraph()
+    p_spacer1.paragraph_format.keep_with_next = True
+    p_spacer2 = docx_doc.add_paragraph()
+    p_spacer2.paragraph_format.keep_with_next = True
+
+    sig_table = docx_doc.add_table(rows=1, cols=2)
+    sig_table.autofit = False
+    sig_table.columns[0].width = left_w_docx
+    sig_table.columns[1].width = right_w_docx
+    kh_cell, nb_cell = sig_table.rows[0].cells
+    kh_cell.width = left_w_docx
+    nb_cell.width = right_w_docx
+    kh_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_run(kh_cell.paragraphs[0], "Khách hàng", bold=True, size=fs)
+    nb_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_run(nb_cell.paragraphs[0], "Người bán hàng", bold=True, size=fs)
+
+    buf = BytesIO()
+    docx_doc.save(buf)
     buf.seek(0)
     return buf
 
@@ -1493,6 +1763,7 @@ def build_sales_invoice_pdf(invoice, items):
 @app.route("/sales/<int:invoice_id>/pdf")
 @login_required
 def sales_pdf(invoice_id):
+    size = request.args.get("size", "a4")
     db = get_db()
     invoice = db.execute("SELECT * FROM sales_invoices WHERE id=?", (invoice_id,)).fetchone()
     if not invoice:
@@ -1501,9 +1772,29 @@ def sales_pdf(invoice_id):
     items = db.execute(
         "SELECT * FROM sales_invoice_items WHERE invoice_id=? ORDER BY stt", (invoice_id,)
     ).fetchall()
-    buf = build_sales_invoice_pdf(invoice, items)
-    filename = f"HoaDon_{invoice['so_hd'] or invoice_id}.pdf"
+    buf = build_sales_invoice_pdf(invoice, items, page_size=size)
+    filename = f"HoaDon_{invoice['so_hd'] or invoice_id}_{size.upper()}.pdf"
     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
+
+
+@app.route("/sales/<int:invoice_id>/docx")
+@login_required
+def sales_docx(invoice_id):
+    size = request.args.get("size", "a4")
+    db = get_db()
+    invoice = db.execute("SELECT * FROM sales_invoices WHERE id=?", (invoice_id,)).fetchone()
+    if not invoice:
+        flash("Không tìm thấy hóa đơn.", "danger")
+        return redirect(url_for("sales_list"))
+    items = db.execute(
+        "SELECT * FROM sales_invoice_items WHERE invoice_id=? ORDER BY stt", (invoice_id,)
+    ).fetchall()
+    buf = build_sales_invoice_docx(invoice, items, page_size=size)
+    filename = f"HoaDon_{invoice['so_hd'] or invoice_id}_{size.upper()}.docx"
+    return send_file(
+        buf, as_attachment=True, download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
 
 
 if __name__ == "__main__":

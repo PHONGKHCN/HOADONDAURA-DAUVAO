@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Tạo hóa đơn bán hàng{% endblock %}
+{% block title %}Tạo hóa đơn bán lẻ{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h4 class="mb-0">Tạo hóa đơn bán hàng</h4>
+  <h4 class="mb-0">Tạo hóa đơn bán lẻ</h4>
   <a href="{{ url_for('sales_list') }}" class="btn btn-outline-secondary btn-sm">← Danh sách</a>
 </div>
 
@@ -23,24 +23,24 @@
     </div>
     <div class="row g-2">
       <div class="col-md-6">
-        <label class="form-label">Tên cửa hàng / đơn vị bán *</label>
+        <label class="form-label">Tên cơ sở / cửa hàng bán *</label>
         <input type="text" name="seller_name" id="sellerName" class="form-control" required>
       </div>
+      <div class="col-md-6">
+        <label class="form-label">Mô tả ngắn (tùy chọn, in dưới tên cơ sở)</label>
+        <input type="text" name="seller_slogan" class="form-control" placeholder="VD: Chuyên cung cấp củ mì, bắp,... nông sản các loại">
+      </div>
       <div class="col-md-4">
-        <label class="form-label">Điện thoại</label>
-        <input type="text" name="seller_phone" id="sellerPhone" class="form-control">
-      </div>
-      <div class="col-md-2">
         <label class="form-label">Số HĐ (nếu có)</label>
-        <input type="text" name="so_hd" class="form-control">
-      </div>
-      <div class="col-md-8">
-        <label class="form-label">Địa chỉ</label>
-        <input type="text" name="seller_address" id="sellerAddress" class="form-control">
+        <input type="text" name="so_hd" class="form-control" placeholder="VD: 01/04.05.HĐBL/2026">
       </div>
       <div class="col-md-4">
         <label class="form-label">Ngày lập *</label>
         <input type="date" name="ngay_lap" class="form-control" value="{{ today }}" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Địa điểm lập (dùng cho dòng ngày tháng)</label>
+        <input type="text" name="dia_diem" class="form-control" placeholder="VD: TPHCM">
       </div>
     </div>
     <div class="form-check mt-2">
@@ -50,7 +50,7 @@
   </div>
 
   <div class="card p-3 mb-3">
-    <h6 class="text-muted">Thông tin khách hàng</h6>
+    <h6 class="text-muted">Thông tin khách hàng (bên mua)</h6>
     <div class="mb-2">
       <label class="form-label small">Chọn từ danh sách đã lưu (tùy chọn)</label>
       <select id="buyerSelect" class="form-select form-select-sm">
@@ -59,10 +59,14 @@
     </div>
     <div class="row g-2">
       <div class="col-md-6">
-        <label class="form-label">Tên khách hàng *</label>
+        <label class="form-label">Họ và tên người nhận hàng *</label>
         <input type="text" name="buyer_name" id="buyerName" class="form-control" required>
       </div>
       <div class="col-md-6">
+        <label class="form-label">Số điện thoại</label>
+        <input type="text" name="buyer_phone" id="buyerPhone" class="form-control">
+      </div>
+      <div class="col-md-12">
         <label class="form-label">Địa chỉ</label>
         <input type="text" name="buyer_address" id="buyerAddress" class="form-control">
       </div>
@@ -181,8 +185,6 @@ document.getElementById("sellerSelect").addEventListener("change", function() {
   const p = ALL_PARTNERS.find(x => String(x.id) === this.value);
   if (p) {
     document.getElementById("sellerName").value = p.ten || "";
-    document.getElementById("sellerAddress").value = p.dia_chi || "";
-    document.getElementById("sellerPhone").value = p.sdt || "";
     document.getElementById("saveSeller").checked = false;
   }
 });
@@ -192,6 +194,7 @@ document.getElementById("buyerSelect").addEventListener("change", function() {
   if (p) {
     document.getElementById("buyerName").value = p.ten || "";
     document.getElementById("buyerAddress").value = p.dia_chi || "";
+    document.getElementById("buyerPhone").value = p.sdt || "";
     document.getElementById("saveBuyer").checked = false;
   }
 });
