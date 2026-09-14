@@ -34,7 +34,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "hoadon.db")
+DB_PATH = os.environ.get("DB_PATH") or os.path.join(os.path.dirname(__file__), "hoadon.db")
 
 FONT_DIR = os.path.join(os.path.dirname(__file__), "static", "fonts")
 pdfmetrics.registerFont(TTFont("VNSans", os.path.join(FONT_DIR, "DejaVuSans.ttf")))
@@ -639,6 +639,84 @@ def export_excel():
 
 
 # ---------- User management (admin only) ----------
+
+@app.route("/backup")
+@login_required
+@admin_required
+def backup_download():
+    """Tải file database hiện tại về máy để sao lưu thủ công."""
+    if not os.path.exists(DB_PATH):
+        flash("Chưa có dữ liệu để sao lưu.", "danger")
+        return redirect(url_for("dashboard"))
+    # Chống ghi đè khi đang có transaction dở dang: chép ra buffer trước khi gửi
+    with sqlite3.connect(DB_PATH) as src:
+        buf = BytesIO()
+        for line in src.iterdump():
+            buf.write((line + "\n").encode("utf-8"))
+    buf.seek(0)
+    filename = f"backup_hoadon_{datetime.now().strftime('%Y%m%d_%H%M%S')}.sql"
+    return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/sql")
+
+
+@app.route("/restore", methods=["GET", "POST"])
+@login_required
+@admin_required
+def restore_upload():
+    if request.method == "POST":
+        file = request.files.get("backup_file")
+        if not file or not file.filename:
+            flash("Vui lòng chọn file sao lưu (.sql).", "danger")
+            return redirect(url_for("restore_upload"))
+
+        # Chỉ khôi phục dữ liệu nghiệp vụ theo mặc định — KHÔNG đụng vào bảng 'users'
+        # để tránh tự khóa tài khoản admin đang đăng nhập. Chỉ khôi phục cả 'users'
+        # khi người dùng chủ động tick chọn.
+        allowed_tables = ["invoices", "sales_invoices", "sales_invoice_items", "partners", "products"]
+        if request.form.get("restore_users"):
+            allowed_tables.append("users")
+        try:
+            sql_text = file.stream.read().decode("utf-8")
+            insert_statements = []
+            tables_seen = set()
+            for line in sql_text.splitlines():
+                line = line.strip()
+                m = re.match(r'INSERT INTO ["\']?(\w+)["\']?', line, re.IGNORECASE)
+                if m and m.group(1) in allowed_tables:
+                    insert_statements.append(line)
+                    tables_seen.add(m.group(1))
+
+            if not insert_statements:
+                flash("File không chứa dữ liệu hợp lệ để khôi phục.", "danger")
+                return redirect(url_for("restore_upload"))
+
+            db = get_db()
+            for table in tables_seen:
+                db.execute(f"DELETE FROM {table}")
+            restored = 0
+            skipped = 0
+            for stmt in insert_statements:
+                try:
+                    db.execute(stmt)
+                    restored += 1
+                except Exception:
+                    skipped += 1
+            db.commit()
+            msg = f"Đã khôi phục {restored} dòng dữ liệu từ file sao lưu."
+            if skipped:
+                msg += f" ({skipped} dòng bị bỏ qua do lỗi định dạng.)"
+            flash(msg, "success")
+
+            if "users" in tables_seen:
+                # Tài khoản vừa bị thay thế toàn bộ — đăng xuất để tránh phiên đăng nhập
+                # hiện tại trỏ vào tài khoản không còn tồn tại/đổi mật khẩu.
+                logout_user()
+                flash("Đã khôi phục tài khoản đăng nhập — vui lòng đăng nhập lại.", "success")
+                return redirect(url_for("login"))
+        except Exception as e:
+            flash(f"Không khôi phục được: {e}", "danger")
+        return redirect(url_for("dashboard"))
+    return render_template("restore.html")
+
 
 @app.route("/users")
 @login_required
