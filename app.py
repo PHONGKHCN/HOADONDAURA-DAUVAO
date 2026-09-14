@@ -1015,10 +1015,19 @@ def extract_products_from_excel(file_stream):
             continue  # sheet này không phải danh mục sản phẩm, bỏ qua
 
         def _to_float(raw):
+            # Quan trọng: phân biệt "ô trống/không có dữ liệu" (trả về None) với
+            # "ô có giá trị 0" (trả về 0.0) — nếu không phân biệt, cột giá tồn tại
+            # trong tiêu đề nhưng bỏ trống (VD: dùng file mẫu chỉ điền 1 loại giá)
+            # sẽ bị hiểu nhầm là "đã có giá = 0", khiến bước tự tính giá còn thiếu
+            # theo % lãi không bao giờ chạy.
+            if raw is None:
+                return None
+            if isinstance(raw, str) and raw.strip() == "":
+                return None
             try:
-                return float(raw) if raw else 0
+                return float(raw)
             except (ValueError, TypeError):
-                return 0
+                return None
 
         for row in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
             if col_map["ten"] >= len(row):
@@ -1494,6 +1503,88 @@ def sales_new():
     )
 
 
+@app.route("/sales/<int:invoice_id>/edit", methods=["GET", "POST"])
+@login_required
+def sales_edit(invoice_id):
+    db = get_db()
+    invoice = db.execute("SELECT * FROM sales_invoices WHERE id=?", (invoice_id,)).fetchone()
+    if not invoice:
+        flash("Không tìm thấy hóa đơn.", "danger")
+        return redirect(url_for("sales_list"))
+
+    if request.method == "POST":
+        f = request.form
+        ten_hang_list = f.getlist("ten_hang[]")
+        quy_cach_list = f.getlist("quy_cach[]")
+        dvt_list = f.getlist("dvt[]")
+        so_luong_list = f.getlist("so_luong[]")
+        don_gia_list = f.getlist("don_gia[]")
+
+        items = []
+        tong_cong = 0
+        stt = 0
+        for i in range(len(ten_hang_list)):
+            ten = ten_hang_list[i].strip()
+            if not ten:
+                continue
+            stt += 1
+            so_luong = float(so_luong_list[i] or 0)
+            don_gia = float(don_gia_list[i] or 0)
+            thanh_tien = so_luong * don_gia
+            tong_cong += thanh_tien
+            items.append({
+                "stt": stt, "ten_hang": ten, "quy_cach": quy_cach_list[i].strip(),
+                "dvt": dvt_list[i].strip(), "so_luong": so_luong, "don_gia": don_gia,
+                "thanh_tien": thanh_tien,
+            })
+
+        if not items:
+            flash("Cần ít nhất 1 mặt hàng.", "danger")
+            return redirect(url_for("sales_edit", invoice_id=invoice_id))
+
+        try:
+            thanh_toan = float(f.get("thanh_toan") or 0)
+        except ValueError:
+            thanh_toan = 0
+
+        db.execute(
+            """UPDATE sales_invoices SET
+               nhom=?, so_hd=?, ngay_lap=?, seller_name=?, seller_slogan=?,
+               buyer_name=?, buyer_address=?, buyer_phone=?, dia_diem=?, tong_cong=?,
+               loai_chung_tu=?, thanh_toan=?
+               WHERE id=?""",
+            (
+                f.get("nhom", "").strip(), f.get("so_hd", "").strip(), f.get("ngay_lap"),
+                f.get("seller_name", "").strip(), f.get("seller_slogan", "").strip(),
+                f.get("buyer_name", "").strip(), f.get("buyer_address", "").strip(),
+                f.get("buyer_phone", "").strip(), f.get("dia_diem", "").strip(), tong_cong,
+                f.get("loai_chung_tu", "hoa_don"), thanh_toan, invoice_id,
+            ),
+        )
+        db.execute("DELETE FROM sales_invoice_items WHERE invoice_id=?", (invoice_id,))
+        for it in items:
+            db.execute(
+                """INSERT INTO sales_invoice_items
+                   (invoice_id, stt, ten_hang, quy_cach, dvt, so_luong, don_gia, thanh_tien)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (invoice_id, it["stt"], it["ten_hang"], it["quy_cach"], it["dvt"],
+                 it["so_luong"], it["don_gia"], it["thanh_tien"]),
+            )
+        db.commit()
+        flash("Đã cập nhật.", "success")
+        return redirect(url_for("sales_view", invoice_id=invoice_id))
+
+    items = [dict(r) for r in db.execute(
+        "SELECT * FROM sales_invoice_items WHERE invoice_id=? ORDER BY stt", (invoice_id,)
+    ).fetchall()]
+    partners_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM partners ORDER BY nhom, loai, ten").fetchall()])
+    products_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM products ORDER BY nhom, ten").fetchall()])
+    return render_template(
+        "sales_form.html", invoice=invoice, items=items,
+        today=invoice["ngay_lap"], partners_json=partners_json, products_json=products_json,
+    )
+
+
 @app.route("/sales/<int:invoice_id>")
 @login_required
 def sales_view(invoice_id):
@@ -1555,14 +1646,14 @@ def build_sales_invoice_pdf(invoice, items, page_size="a4"):
 
     story = []
 
-    left_w = 75 * mm if is_a5 else 85 * mm
-    right_w = 55 * mm if is_a5 else 85 * mm
+    left_w = 68 * mm if is_a5 else 75 * mm
+    right_w = 62 * mm if is_a5 else 95 * mm
 
     left_cell = [Paragraph(f"CƠ SỞ {invoice['seller_name'] or ''}".upper(), style_bold)]
     if invoice["seller_slogan"]:
         left_cell.append(Paragraph(invoice["seller_slogan"], style_slogan))
     right_cell = [
-        Paragraph("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", style_quochieu),
+        Paragraph("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT\u00A0NAM", style_quochieu),
         Paragraph("<u>Độc lập – Tự do – Hạnh Phúc</u>", style_quochieu),
     ]
     header_table = Table([[left_cell, right_cell]], colWidths=[left_w, right_w])
@@ -1754,8 +1845,8 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
     header_table = docx_doc.add_table(rows=1, cols=2)
     header_table.autofit = False
     header_w = Mm(148 - 24) if is_a5 else Mm(210 - 36)
-    left_w_docx = Mm((148 - 24) * 0.55) if is_a5 else Mm((210 - 36) * 0.55)
-    right_w_docx = Mm((148 - 24) * 0.45) if is_a5 else Mm((210 - 36) * 0.45)
+    left_w_docx = Mm((148 - 24) * 0.42) if is_a5 else Mm((210 - 36) * 0.42)
+    right_w_docx = Mm((148 - 24) * 0.58) if is_a5 else Mm((210 - 36) * 0.58)
     header_table.columns[0].width = left_w_docx
     header_table.columns[1].width = right_w_docx
     left_cell, right_cell = header_table.rows[0].cells
@@ -1770,7 +1861,7 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
 
     p2 = right_cell.paragraphs[0]
     p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_run(p2, "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", bold=True, size=fs)
+    _set_run(p2, "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT\u00A0NAM", bold=True, size=fs)
     p3 = right_cell.add_paragraph()
     p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _set_run(p3, "Độc lập – Tự do – Hạnh Phúc", bold=True, size=fs, underline=True)
