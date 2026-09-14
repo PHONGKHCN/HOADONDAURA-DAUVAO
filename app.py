@@ -168,9 +168,11 @@ def init_db():
     # Migration: thêm các cột mới cho mẫu "Hóa đơn bán lẻ" (số điện thoại người mua,
     # địa điểm lập hóa đơn, dòng mô tả nhỏ dưới tên bên bán)
     sales_cols = [r["name"] for r in db.execute("PRAGMA table_info(sales_invoices)").fetchall()]
-    for col in ("buyer_phone", "dia_diem", "seller_slogan"):
+    for col in ("buyer_phone", "dia_diem", "seller_slogan", "loai_chung_tu"):
         if col not in sales_cols:
             db.execute(f"ALTER TABLE sales_invoices ADD COLUMN {col} TEXT")
+    if "thanh_toan" not in sales_cols:
+        db.execute("ALTER TABLE sales_invoices ADD COLUMN thanh_toan REAL DEFAULT 0")
     db.commit()
 
     # Seed one admin account if no users exist yet
@@ -1428,16 +1430,23 @@ def sales_new():
         buyer_address = f.get("buyer_address", "").strip()
         buyer_phone = f.get("buyer_phone", "").strip()
         dia_diem = f.get("dia_diem", "").strip()
+        loai_chung_tu = f.get("loai_chung_tu", "hoa_don")
+        try:
+            thanh_toan = float(f.get("thanh_toan") or 0)
+        except ValueError:
+            thanh_toan = 0
 
         cur = db.execute(
             """INSERT INTO sales_invoices
                (nhom, so_hd, ngay_lap, seller_name, seller_slogan,
-                buyer_name, buyer_address, buyer_phone, dia_diem, tong_cong, nguoi_tao_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                buyer_name, buyer_address, buyer_phone, dia_diem, tong_cong,
+                loai_chung_tu, thanh_toan, nguoi_tao_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 nhom, f.get("so_hd", "").strip(), f.get("ngay_lap"),
                 seller_name, seller_slogan, buyer_name,
-                buyer_address, buyer_phone, dia_diem, tong_cong, current_user.id,
+                buyer_address, buyer_phone, dia_diem, tong_cong,
+                loai_chung_tu, thanh_toan, current_user.id,
             ),
         )
         invoice_id = cur.lastrowid
@@ -1565,14 +1574,31 @@ def build_sales_invoice_pdf(invoice, items, page_size="a4"):
     story.append(header_table)
     story.append(Spacer(1, 10 if is_a5 else 14))
 
-    story.append(Paragraph("HÓA ĐƠN BÁN LẺ", style_title))
-    if invoice["so_hd"]:
+    is_phieu = invoice["loai_chung_tu"] == "phieu_giao"
+
+    story.append(Paragraph("PHIẾU GIAO HÀNG" if is_phieu else "HÓA ĐƠN BÁN LẺ", style_title))
+    if is_phieu:
+        ngay_str_top = invoice["ngay_lap"]
+        try:
+            d0 = datetime.strptime(ngay_str_top, "%Y-%m-%d")
+            ngay_phrase_top = f"ngày {d0.day} tháng {d0.month:02d} năm {d0.year}"
+        except Exception:
+            ngay_phrase_top = ngay_str_top
+        dia_diem_top = invoice["dia_diem"] or ""
+        dong_ngay_top = f"{dia_diem_top}, {ngay_phrase_top}" if dia_diem_top else ngay_phrase_top.capitalize()
+        story.append(Paragraph(f"<i>{dong_ngay_top}</i>", style_center))
+    elif invoice["so_hd"]:
         story.append(Paragraph(f"Số: {invoice['so_hd']}", style_center))
     story.append(Spacer(1, 8 if is_a5 else 10))
 
     story.append(Paragraph(f"- Họ và tên người nhận hàng: {invoice['buyer_name']}", style_normal))
     story.append(Paragraph(f"- Địa chỉ: {invoice['buyer_address'] or ''}", style_normal))
     story.append(Paragraph(f"- Số điện thoại: {invoice['buyer_phone'] or ''}", style_normal))
+    if is_phieu:
+        story.append(Paragraph(
+            "<i>Tôi/chúng tôi tiến hành bàn giao cho Ông/Bà hàng hóa theo bảng kê dưới đây:</i>",
+            style_normal,
+        ))
     story.append(Spacer(1, 4))
 
     dvt_para = Paragraph("<i>ĐVT: Đồng</i>", style_right)
@@ -1627,10 +1653,18 @@ def build_sales_invoice_pdf(invoice, items, page_size="a4"):
 
     so_chu = so_thanh_chu(invoice["tong_cong"])
     footer_block = []
-    footer_block.append(Paragraph(
-        f"Thành tiền: {invoice['tong_cong']:,.0f} đồng (Bằng chữ: <i>{so_chu.rstrip('.')}</i>).",
-        style_red,
-    ))
+
+    if is_phieu:
+        thanh_toan = float(invoice["thanh_toan"] or 0)
+        con_lai = invoice["tong_cong"] - thanh_toan
+        footer_block.append(Paragraph(f"- Tổng số tiền: <b>{invoice['tong_cong']:,.0f} đồng</b>", style_normal))
+        footer_block.append(Paragraph(f"- Thanh toán: <b>{thanh_toan:,.0f} đồng</b>", style_normal))
+        footer_block.append(Paragraph(f"- Còn lại: <b>{con_lai:,.0f} đồng</b>", style_red))
+    else:
+        footer_block.append(Paragraph(
+            f"Thành tiền: {invoice['tong_cong']:,.0f} đồng (Bằng chữ: <i>{so_chu.rstrip('.')}</i>).",
+            style_red,
+        ))
     footer_block.append(Spacer(1, 6 if is_a5 else 8))
 
     ngay_str = invoice["ngay_lap"]
@@ -1641,14 +1675,29 @@ def build_sales_invoice_pdf(invoice, items, page_size="a4"):
         ngay_phrase = ngay_str
     dia_diem = invoice["dia_diem"] or ""
     dòng_ngay = f"{dia_diem}, {ngay_phrase}" if dia_diem else ngay_phrase.capitalize()
-    footer_block.append(Paragraph(dòng_ngay, style_right))
+    if not is_phieu:
+        footer_block.append(Paragraph(dòng_ngay, style_right))
     footer_block.append(Spacer(1, 16 if is_a5 else 20))
 
-    sig_table = Table(
-        [[Paragraph("Khách hàng", style_center), Paragraph("Người bán hàng", style_center)]],
-        colWidths=[left_w, right_w],
-    )
-    footer_block.append(sig_table)
+    if is_phieu:
+        sig_table = Table(
+            [[Paragraph("BÊN GIAO", style_center), Paragraph("KHÁCH HÀNG", style_center)]],
+            colWidths=[left_w, right_w],
+        )
+        footer_block.append(sig_table)
+        footer_block.append(Spacer(1, 30 if is_a5 else 40))
+        name_table = Table(
+            [[Paragraph(invoice["seller_name"] or "", style_bold), Paragraph("", style_center)]],
+            colWidths=[left_w, right_w],
+        )
+        name_table.setStyle(TableStyle([("ALIGN", (0, 0), (0, 0), "CENTER")]))
+        footer_block.append(name_table)
+    else:
+        sig_table = Table(
+            [[Paragraph("Khách hàng", style_center), Paragraph("Người bán hàng", style_center)]],
+            colWidths=[left_w, right_w],
+        )
+        footer_block.append(sig_table)
 
     story.append(KeepTogether(footer_block))
 
@@ -1728,11 +1777,26 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
 
     docx_doc.add_paragraph()
 
+    is_phieu = invoice["loai_chung_tu"] == "phieu_giao"
+
     p_title = docx_doc.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_run(p_title, "HÓA ĐƠN BÁN LẺ", bold=True, size=fs_title)
+    _set_run(p_title, "PHIẾU GIAO HÀNG" if is_phieu else "HÓA ĐƠN BÁN LẺ", bold=True, size=fs_title)
 
-    if invoice["so_hd"]:
+    ngay_str_top = invoice["ngay_lap"]
+    try:
+        d0 = datetime.strptime(ngay_str_top, "%Y-%m-%d")
+        ngay_phrase_top = f"ngày {d0.day} tháng {d0.month:02d} năm {d0.year}"
+    except Exception:
+        ngay_phrase_top = ngay_str_top
+    dia_diem_top = invoice["dia_diem"] or ""
+    dong_ngay_top = f"{dia_diem_top}, {ngay_phrase_top}" if dia_diem_top else ngay_phrase_top.capitalize()
+
+    if is_phieu:
+        p_so = docx_doc.add_paragraph()
+        p_so.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_run(p_so, dong_ngay_top, italic=True, size=fs)
+    elif invoice["so_hd"]:
         p_so = docx_doc.add_paragraph()
         p_so.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_run(p_so, f"Số: {invoice['so_hd']}", size=fs)
@@ -1746,6 +1810,11 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
     ):
         pb = docx_doc.add_paragraph()
         _set_run(pb, line, size=fs)
+
+    if is_phieu:
+        p_transition = docx_doc.add_paragraph()
+        _set_run(p_transition, "Tôi/chúng tôi tiến hành bàn giao cho Ông/Bà hàng hóa theo bảng kê dưới đây:",
+                  italic=True, size=fs)
 
     p_dvt = docx_doc.add_paragraph()
     p_dvt.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -1794,13 +1863,27 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
 
     docx_doc.add_paragraph()
     so_chu = so_thanh_chu(invoice["tong_cong"])
-    p_total = docx_doc.add_paragraph()
-    p_total.paragraph_format.keep_with_next = True
-    _set_run(
-        p_total,
-        f"Thành tiền: {invoice['tong_cong']:,.0f} đồng (Bằng chữ: {so_chu.rstrip('.')}).",
-        bold=True, size=fs, color="C00000",
-    )
+
+    if is_phieu:
+        thanh_toan = float(invoice["thanh_toan"] or 0)
+        con_lai = invoice["tong_cong"] - thanh_toan
+        p_tong = docx_doc.add_paragraph()
+        p_tong.paragraph_format.keep_with_next = True
+        _set_run(p_tong, f"- Tổng số tiền: {invoice['tong_cong']:,.0f} đồng", bold=True, size=fs)
+        p_ttoan = docx_doc.add_paragraph()
+        p_ttoan.paragraph_format.keep_with_next = True
+        _set_run(p_ttoan, f"- Thanh toán: {thanh_toan:,.0f} đồng", bold=True, size=fs)
+        p_conlai = docx_doc.add_paragraph()
+        p_conlai.paragraph_format.keep_with_next = True
+        _set_run(p_conlai, f"- Còn lại: {con_lai:,.0f} đồng", bold=True, size=fs, color="C00000")
+    else:
+        p_total = docx_doc.add_paragraph()
+        p_total.paragraph_format.keep_with_next = True
+        _set_run(
+            p_total,
+            f"Thành tiền: {invoice['tong_cong']:,.0f} đồng (Bằng chữ: {so_chu.rstrip('.')}).",
+            bold=True, size=fs, color="C00000",
+        )
 
     ngay_str = invoice["ngay_lap"]
     try:
@@ -1810,10 +1893,11 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
         ngay_phrase = ngay_str
     dia_diem = invoice["dia_diem"] or ""
     dòng_ngay = f"{dia_diem}, {ngay_phrase}" if dia_diem else ngay_phrase.capitalize()
-    p_ngay = docx_doc.add_paragraph()
-    p_ngay.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    p_ngay.paragraph_format.keep_with_next = True
-    _set_run(p_ngay, dòng_ngay, size=fs)
+    if not is_phieu:
+        p_ngay = docx_doc.add_paragraph()
+        p_ngay.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        p_ngay.paragraph_format.keep_with_next = True
+        _set_run(p_ngay, dòng_ngay, size=fs)
 
     p_spacer1 = docx_doc.add_paragraph()
     p_spacer1.paragraph_format.keep_with_next = True
@@ -1824,13 +1908,22 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
     sig_table.autofit = False
     sig_table.columns[0].width = left_w_docx
     sig_table.columns[1].width = right_w_docx
-    kh_cell, nb_cell = sig_table.rows[0].cells
-    kh_cell.width = left_w_docx
-    nb_cell.width = right_w_docx
-    kh_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_run(kh_cell.paragraphs[0], "Khách hàng", bold=True, size=fs)
-    nb_cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_run(nb_cell.paragraphs[0], "Người bán hàng", bold=True, size=fs)
+    left_sig, right_sig = sig_table.rows[0].cells
+    left_sig.width = left_w_docx
+    right_sig.width = right_w_docx
+    left_sig.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    right_sig.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if is_phieu:
+        _set_run(left_sig.paragraphs[0], "BÊN GIAO", bold=True, size=fs)
+        _set_run(right_sig.paragraphs[0], "KHÁCH HÀNG", bold=True, size=fs)
+        for _ in range(3):
+            docx_doc.add_paragraph()
+        p_name = docx_doc.add_paragraph()
+        p_name.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _set_run(p_name, invoice["seller_name"] or "", bold=True, size=fs)
+    else:
+        _set_run(left_sig.paragraphs[0], "Khách hàng", bold=True, size=fs)
+        _set_run(right_sig.paragraphs[0], "Người bán hàng", bold=True, size=fs)
 
     buf = BytesIO()
     docx_doc.save(buf)

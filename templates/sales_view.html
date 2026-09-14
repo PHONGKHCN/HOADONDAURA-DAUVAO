@@ -16,6 +16,7 @@
   </div>
 </div>
 
+{% set is_phieu = invoice.loai_chung_tu == 'phieu_giao' %}
 <div class="card p-4">
   <div class="row mb-3">
     <div class="col-6">
@@ -29,14 +30,23 @@
   </div>
 
   <div class="text-center mb-3">
-    <h4 class="fw-bold mt-2">HÓA ĐƠN BÁN LẺ</h4>
-    {% if invoice.so_hd %}<div>Số: {{ invoice.so_hd }}</div>{% endif %}
+    <h4 class="fw-bold mt-2">{{ "PHIẾU GIAO HÀNG" if is_phieu else "HÓA ĐƠN BÁN LẺ" }}</h4>
+    {% if is_phieu %}
+      <div class="fst-italic">
+        {% if invoice.dia_diem %}{{ invoice.dia_diem }}, {% endif %}ngày {{ invoice.ngay_lap[8:10] }} tháng {{ invoice.ngay_lap[5:7] }} năm {{ invoice.ngay_lap[0:4] }}
+      </div>
+    {% elif invoice.so_hd %}
+      <div>Số: {{ invoice.so_hd }}</div>
+    {% endif %}
   </div>
 
   <div class="mb-3">
     <div>- Họ và tên người nhận hàng: {{ invoice.buyer_name }}</div>
     <div>- Địa chỉ: {{ invoice.buyer_address }}</div>
     <div>- Số điện thoại: {{ invoice.buyer_phone }}</div>
+    {% if is_phieu %}
+    <div class="fst-italic">Tôi/chúng tôi tiến hành bàn giao cho Ông/Bà hàng hóa theo bảng kê dưới đây:</div>
+    {% endif %}
   </div>
 
   <div class="text-end fst-italic mb-1">ĐVT: Đồng</div>
@@ -72,17 +82,35 @@
     </table>
   </div>
 
+  {% if is_phieu %}
+  <div class="mb-4">
+    <div>- Tổng số tiền: <strong>{{ "{:,.0f}".format(invoice.tong_cong) }} đồng</strong></div>
+    <div>- Thanh toán: <strong>{{ "{:,.0f}".format(invoice.thanh_toan or 0) }} đồng</strong></div>
+    <div style="color:#C00000;">- Còn lại: <strong>{{ "{:,.0f}".format(invoice.tong_cong - (invoice.thanh_toan or 0)) }} đồng</strong></div>
+  </div>
+  {% else %}
   <div class="mb-4 fw-bold" style="color:#C00000;">
     Thành tiền: {{ "{:,.0f}".format(invoice.tong_cong) }} đồng (Bằng chữ: {{ so_tien_chu.rstrip('.') }}).
   </div>
-
   <div class="text-end mb-4">
     {% if invoice.dia_diem %}{{ invoice.dia_diem }}, {% endif %}ngày {{ invoice.ngay_lap[8:10] }} tháng {{ invoice.ngay_lap[5:7] }} năm {{ invoice.ngay_lap[0:4] }}
   </div>
+  {% endif %}
 
   <div class="row text-center">
+    {% if is_phieu %}
+    <div class="col-6"><strong>BÊN GIAO</strong></div>
+    <div class="col-6"><strong>KHÁCH HÀNG</strong></div>
+    {% else %}
     <div class="col-6"><strong>Khách hàng</strong></div>
     <div class="col-6"><strong>Người bán hàng</strong></div>
+    {% endif %}
   </div>
+  {% if is_phieu %}
+  <div class="row text-center mt-5">
+    <div class="col-6">{{ invoice.seller_name }}</div>
+    <div class="col-6"></div>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

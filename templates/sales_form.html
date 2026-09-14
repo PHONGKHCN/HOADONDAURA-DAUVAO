@@ -1,12 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Tạo hóa đơn bán lẻ{% endblock %}
+{% block title %}Tạo hóa đơn / phiếu giao hàng{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h4 class="mb-0">Tạo hóa đơn bán lẻ</h4>
+  <h4 class="mb-0">Tạo hóa đơn / phiếu giao hàng</h4>
   <a href="{{ url_for('sales_list') }}" class="btn btn-outline-secondary btn-sm">← Danh sách</a>
 </div>
 
 <form method="post">
+  <div class="card p-3 mb-3">
+    <h6 class="text-muted">Loại chứng từ</h6>
+    <div class="btn-group" role="group">
+      <input type="radio" class="btn-check" name="loai_chung_tu" id="loaiHoaDon" value="hoa_don" checked onchange="toggleChungTu()">
+      <label class="btn btn-outline-primary" for="loaiHoaDon">Hóa đơn bán lẻ</label>
+      <input type="radio" class="btn-check" name="loai_chung_tu" id="loaiPhieu" value="phieu_giao" onchange="toggleChungTu()">
+      <label class="btn btn-outline-primary" for="loaiPhieu">Phiếu giao hàng</label>
+    </div>
+  </div>
+
   <div class="card p-3 mb-3">
     <h6 class="text-muted">Nhóm/Khách hàng (để lưu & lọc danh sách đối tác riêng cho từng khách)</h6>
     <input type="text" id="nhomInput" name="nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD" list="nhomList">
@@ -123,7 +133,21 @@
     </div>
   </div>
 
-  <button type="submit" class="btn btn-success">Lưu hóa đơn</button>
+  <div class="card p-3 mb-3" id="thanhToanBox" style="display:none;">
+    <h6 class="text-muted">Thanh toán (chỉ dùng cho Phiếu giao hàng)</h6>
+    <div class="row g-2">
+      <div class="col-md-6">
+        <label class="form-label">Đã thanh toán (đ)</label>
+        <input type="number" step="any" name="thanh_toan" id="thanhToanInput" class="form-control" value="0">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Còn lại</label>
+        <input type="text" id="conLaiDisplay" class="form-control" disabled>
+      </div>
+    </div>
+  </div>
+
+  <button type="submit" class="btn btn-success">Lưu</button>
 </form>
 
 <script>
@@ -318,7 +342,25 @@ function recalc() {
     tong += tt;
   });
   document.getElementById("tongCong").textContent = tong.toLocaleString("vi-VN");
+  updateConLai();
 }
+
+function toggleChungTu() {
+  const isPhieu = document.getElementById("loaiPhieu").checked;
+  document.getElementById("thanhToanBox").style.display = isPhieu ? "block" : "none";
+}
+
+function updateConLai() {
+  const tongText = document.getElementById("tongCong").textContent.replace(/\./g, "").replace(/,/g, "");
+  const tong = parseFloat(tongText) || 0;
+  const daTra = parseFloat(document.getElementById("thanhToanInput").value) || 0;
+  const conLai = tong - daTra;
+  document.getElementById("conLaiDisplay").value = conLai.toLocaleString("vi-VN") + " đ";
+}
+
+document.getElementById("thanhToanInput").addEventListener("input", updateConLai);
+toggleChungTu();
+updateConLai();
 
 // Start with 2 empty rows
 addRow();
