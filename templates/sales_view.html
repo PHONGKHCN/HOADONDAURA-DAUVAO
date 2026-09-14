@@ -89,10 +89,10 @@
   <div class="mb-4">
     <div>- Tổng số tiền: <strong>{{ "{:,.0f}".format(invoice.tong_cong) }} đồng</strong></div>
     <div>- Thanh toán: <strong>{{ "{:,.0f}".format(invoice.thanh_toan or 0) }} đồng</strong></div>
-    <div style="color:#C00000;">- Còn lại: <strong>{{ "{:,.0f}".format(invoice.tong_cong - (invoice.thanh_toan or 0)) }} đồng</strong></div>
+    <div class="fw-bold">- Còn lại: <strong>{{ "{:,.0f}".format(invoice.tong_cong - (invoice.thanh_toan or 0)) }} đồng</strong></div>
   </div>
   {% else %}
-  <div class="mb-4 fw-bold" style="color:#C00000;">
+  <div class="mb-4 fw-bold">
     Thành tiền: {{ "{:,.0f}".format(invoice.tong_cong) }} đồng (Bằng chữ: {{ so_tien_chu.rstrip('.') }}).
   </div>
   <div class="text-end mb-4">

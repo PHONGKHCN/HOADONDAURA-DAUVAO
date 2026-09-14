@@ -1883,7 +1883,7 @@ def build_sales_invoice_pdf(invoice, items, page_size="a4"):
     style_cell_right = ParagraphStyle("cell_right", parent=style_cell, alignment=TA_RIGHT)
     style_cell_bold_center = ParagraphStyle("cell_bold_center", parent=style_cell_bold, alignment=TA_CENTER)
     style_cell_bold_right = ParagraphStyle("cell_bold_right", parent=style_cell_bold, alignment=TA_RIGHT)
-    style_red = ParagraphStyle("red", fontName="VNSans-Bold", fontSize=10 * fs, textColor=colors.HexColor("#C00000"))
+    style_red = ParagraphStyle("red", fontName="VNSans-Bold", fontSize=10 * fs)
 
     story = []
 
@@ -1970,13 +1970,10 @@ def build_sales_invoice_pdf(invoice, items, page_size="a4"):
     tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
     tbl.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#333333")),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2E5266")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ALIGN", (0, 0), (0, -1), "CENTER"),
         ("ALIGN", (2, 0), (2, -1), "CENTER"),
         ("ALIGN", (3, 0), (5, -1), "RIGHT"),
-        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#D6E4F0")),
         ("TOPPADDING", (0, 0), (-1, -1), 3 if is_a5 else 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3 if is_a5 else 4),
     ]))
@@ -2167,8 +2164,7 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
     for i, h in enumerate(headers):
         cell = table.rows[0].cells[i]
         cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-        _set_run(cell.paragraphs[0], h, bold=True, size=fs_cell, color="FFFFFF")
-        _set_cell_shading(cell, "2E5266")
+        _set_run(cell.paragraphs[0], h, bold=True, size=fs_cell)
 
     tong_so_luong = 0
     for it in items:
@@ -2191,7 +2187,6 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
     for i, val in enumerate(total_values):
         total_row[i].paragraphs[0].alignment = total_aligns[i]
         _set_run(total_row[i].paragraphs[0], val, bold=True, size=fs_cell)
-        _set_cell_shading(total_row[i], "D6E4F0")
 
     docx_doc.add_paragraph()
     so_chu = so_thanh_chu(invoice["tong_cong"])
@@ -2207,14 +2202,14 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
         _set_run(p_ttoan, f"- Thanh toán: {thanh_toan:,.0f} đồng", bold=True, size=fs)
         p_conlai = docx_doc.add_paragraph()
         p_conlai.paragraph_format.keep_with_next = True
-        _set_run(p_conlai, f"- Còn lại: {con_lai:,.0f} đồng", bold=True, size=fs, color="C00000")
+        _set_run(p_conlai, f"- Còn lại: {con_lai:,.0f} đồng", bold=True, size=fs)
     else:
         p_total = docx_doc.add_paragraph()
         p_total.paragraph_format.keep_with_next = True
         _set_run(
             p_total,
             f"Thành tiền: {invoice['tong_cong']:,.0f} đồng (Bằng chữ: {so_chu.rstrip('.')}).",
-            bold=True, size=fs, color="C00000",
+            bold=True, size=fs,
         )
 
     ngay_str = invoice["ngay_lap"]
