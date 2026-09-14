@@ -31,6 +31,8 @@
         <li class="nav-item"><a class="nav-link" href="{{ url_for('partner_list') }}">Đối tác</a></li>
         {% if current_user.is_admin %}
         <li class="nav-item"><a class="nav-link" href="{{ url_for('user_list') }}">Tài khoản</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('backup_download') }}">Sao lưu</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('restore_upload') }}">Khôi phục</a></li>
         {% endif %}
       </ul>
       <span class="navbar-text text-light me-3">{{ current_user.full_name or current_user.username }} ({{ 'Admin' if current_user.is_admin else 'Nhân viên' }})</span>

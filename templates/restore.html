@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Khôi phục dữ liệu{% endblock %}
+{% block content %}
+<h4 class="mb-3">Khôi phục dữ liệu từ file sao lưu</h4>
+
+<div class="alert alert-warning">
+  <strong>Lưu ý quan trọng:</strong> Thao tác này sẽ <strong>xóa sạch dữ liệu hiện tại</strong>
+  (hóa đơn, sản phẩm, đối tác) và thay bằng dữ liệu trong file sao lưu. Không thể hoàn tác.
+  Tài khoản đăng nhập (users) sẽ <strong>không</strong> bị ảnh hưởng.
+</div>
+
+<form method="post" enctype="multipart/form-data" class="card p-4" style="max-width:520px;">
+  <div class="mb-3">
+    <label class="form-label">Chọn file sao lưu (.sql)</label>
+    <input type="file" name="backup_file" accept=".sql" class="form-control" required>
+  </div>
+  <div class="form-check mb-3">
+    <input class="form-check-input" type="checkbox" name="restore_users" id="restoreUsers" value="1">
+    <label class="form-check-label small" for="restoreUsers">
+      Khôi phục cả tài khoản đăng nhập (users) — chỉ chọn nếu tài khoản cũng đã bị mất.
+      Sau khi khôi phục bạn sẽ bị đăng xuất và cần đăng nhập lại.
+    </label>
+  </div>
+  <button type="submit" class="btn btn-danger"
+          onclick="return confirm('Chắc chắn muốn khôi phục? Dữ liệu hiện tại sẽ bị xóa và thay thế.');">
+    Khôi phục dữ liệu
+  </button>
+  <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Hủy</a>
+</form>
+{% endblock %}
