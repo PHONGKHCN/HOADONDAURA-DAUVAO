@@ -1,25 +1,27 @@
 {% extends "base.html" %}
-{% block title %}Tạo hóa đơn / phiếu giao hàng{% endblock %}
+{% block title %}{{ "Sửa" if invoice else "Tạo" }} hóa đơn / phiếu giao hàng{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h4 class="mb-0">Tạo hóa đơn / phiếu giao hàng</h4>
+  <h4 class="mb-0">{{ "Sửa" if invoice else "Tạo" }} hóa đơn / phiếu giao hàng</h4>
   <a href="{{ url_for('sales_list') }}" class="btn btn-outline-secondary btn-sm">← Danh sách</a>
 </div>
 
-<form method="post">
+<form method="post" action="{{ url_for('sales_edit', invoice_id=invoice.id) if invoice else url_for('sales_new') }}">
   <div class="card p-3 mb-3">
     <h6 class="text-muted">Loại chứng từ</h6>
     <div class="btn-group" role="group">
-      <input type="radio" class="btn-check" name="loai_chung_tu" id="loaiHoaDon" value="hoa_don" checked onchange="toggleChungTu()">
+      <input type="radio" class="btn-check" name="loai_chung_tu" id="loaiHoaDon" value="hoa_don"
+             {{ "checked" if not invoice or invoice.loai_chung_tu != "phieu_giao" }} onchange="toggleChungTu()">
       <label class="btn btn-outline-primary" for="loaiHoaDon">Hóa đơn bán lẻ</label>
-      <input type="radio" class="btn-check" name="loai_chung_tu" id="loaiPhieu" value="phieu_giao" onchange="toggleChungTu()">
+      <input type="radio" class="btn-check" name="loai_chung_tu" id="loaiPhieu" value="phieu_giao"
+             {{ "checked" if invoice and invoice.loai_chung_tu == "phieu_giao" }} onchange="toggleChungTu()">
       <label class="btn btn-outline-primary" for="loaiPhieu">Phiếu giao hàng</label>
     </div>
   </div>
 
   <div class="card p-3 mb-3">
     <h6 class="text-muted">Nhóm/Khách hàng (để lưu & lọc danh sách đối tác riêng cho từng khách)</h6>
-    <input type="text" id="nhomInput" name="nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD" list="nhomList">
+    <input type="text" id="nhomInput" name="nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD" list="nhomList" value="{{ invoice.nhom if invoice else '' }}">
     <datalist id="nhomList"></datalist>
   </div>
 
@@ -34,15 +36,15 @@
     <div class="row g-2">
       <div class="col-md-6">
         <label class="form-label">Tên cơ sở / cửa hàng bán *</label>
-        <input type="text" name="seller_name" id="sellerName" class="form-control" required>
+        <input type="text" name="seller_name" id="sellerName" class="form-control" required value="{{ invoice.seller_name if invoice else '' }}">
       </div>
       <div class="col-md-6">
         <label class="form-label">Mô tả ngắn (tùy chọn, in dưới tên cơ sở)</label>
-        <input type="text" name="seller_slogan" class="form-control" placeholder="VD: Chuyên cung cấp củ mì, bắp,... nông sản các loại">
+        <input type="text" name="seller_slogan" class="form-control" placeholder="VD: Chuyên cung cấp củ mì, bắp,... nông sản các loại" value="{{ invoice.seller_slogan if invoice else '' }}">
       </div>
       <div class="col-md-4">
         <label class="form-label">Số HĐ (nếu có)</label>
-        <input type="text" name="so_hd" class="form-control" placeholder="VD: 01/04.05.HĐBL/2026">
+        <input type="text" name="so_hd" class="form-control" placeholder="VD: 01/04.05.HĐBL/2026" value="{{ invoice.so_hd if invoice else '' }}">
       </div>
       <div class="col-md-4">
         <label class="form-label">Ngày lập *</label>
@@ -50,7 +52,7 @@
       </div>
       <div class="col-md-4">
         <label class="form-label">Địa điểm lập (dùng cho dòng ngày tháng)</label>
-        <input type="text" name="dia_diem" class="form-control" placeholder="VD: TPHCM">
+        <input type="text" name="dia_diem" class="form-control" placeholder="VD: TPHCM" value="{{ invoice.dia_diem if invoice else '' }}">
       </div>
     </div>
     <div class="form-check mt-2">
@@ -70,15 +72,15 @@
     <div class="row g-2">
       <div class="col-md-6">
         <label class="form-label">Họ và tên người nhận hàng *</label>
-        <input type="text" name="buyer_name" id="buyerName" class="form-control" required>
+        <input type="text" name="buyer_name" id="buyerName" class="form-control" required value="{{ invoice.buyer_name if invoice else '' }}">
       </div>
       <div class="col-md-6">
         <label class="form-label">Số điện thoại</label>
-        <input type="text" name="buyer_phone" id="buyerPhone" class="form-control">
+        <input type="text" name="buyer_phone" id="buyerPhone" class="form-control" value="{{ invoice.buyer_phone if invoice else '' }}">
       </div>
       <div class="col-md-12">
         <label class="form-label">Địa chỉ</label>
-        <input type="text" name="buyer_address" id="buyerAddress" class="form-control">
+        <input type="text" name="buyer_address" id="buyerAddress" class="form-control" value="{{ invoice.buyer_address if invoice else '' }}">
       </div>
     </div>
     <div class="form-check mt-2">
@@ -138,7 +140,7 @@
     <div class="row g-2">
       <div class="col-md-6">
         <label class="form-label">Đã thanh toán (đ)</label>
-        <input type="number" step="any" name="thanh_toan" id="thanhToanInput" class="form-control" value="0">
+        <input type="number" step="any" name="thanh_toan" id="thanhToanInput" class="form-control" value="{{ invoice.thanh_toan if invoice else 0 }}">
       </div>
       <div class="col-md-6">
         <label class="form-label">Còn lại</label>
@@ -147,7 +149,7 @@
     </div>
   </div>
 
-  <button type="submit" class="btn btn-success">Lưu</button>
+  <button type="submit" class="btn btn-success">{{ "Cập nhật" if invoice else "Lưu" }}</button>
 </form>
 
 <script>
@@ -227,17 +229,19 @@ populateNhomList();
 refreshPartnerSelects();
 refreshProductList();
 
-function addRow() {
+function addRow(data) {
+  data = data || {};
   rowCount++;
   const tbody = document.getElementById("itemsBody");
   const tr = document.createElement("tr");
+  const esc = (v) => (v || "").toString().replace(/"/g, "&quot;");
   tr.innerHTML = `
     <td class="text-center stt">${rowCount}</td>
-    <td><input type="text" name="ten_hang[]" class="form-control form-control-sm" list="productList"></td>
-    <td><input type="text" name="quy_cach[]" class="form-control form-control-sm"></td>
-    <td><input type="text" name="dvt[]" class="form-control form-control-sm"></td>
-    <td><input type="number" step="any" name="so_luong[]" class="form-control form-control-sm sl" value="0"></td>
-    <td><input type="number" step="any" name="don_gia[]" class="form-control form-control-sm dg" value="0"></td>
+    <td><input type="text" name="ten_hang[]" class="form-control form-control-sm" list="productList" value="${esc(data.ten_hang)}"></td>
+    <td><input type="text" name="quy_cach[]" class="form-control form-control-sm" value="${esc(data.quy_cach)}"></td>
+    <td><input type="text" name="dvt[]" class="form-control form-control-sm" value="${esc(data.dvt)}"></td>
+    <td><input type="number" step="any" name="so_luong[]" class="form-control form-control-sm sl" value="${data.so_luong || 0}"></td>
+    <td><input type="number" step="any" name="don_gia[]" class="form-control form-control-sm dg" value="${data.don_gia || 0}"></td>
     <td class="text-end thanh-tien">0</td>
     <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRow(this)">✕</button></td>
   `;
@@ -362,8 +366,13 @@ document.getElementById("thanhToanInput").addEventListener("input", updateConLai
 toggleChungTu();
 updateConLai();
 
-// Start with 2 empty rows
-addRow();
-addRow();
+// Khi sửa hóa đơn: nạp sẵn các dòng mặt hàng đã có. Khi tạo mới: 2 dòng trống.
+const EXISTING_ITEMS = {{ (items | tojson) if invoice else "[]" }};
+if (EXISTING_ITEMS.length > 0) {
+  EXISTING_ITEMS.forEach(it => addRow(it));
+} else {
+  addRow();
+  addRow();
+}
 </script>
 {% endblock %}

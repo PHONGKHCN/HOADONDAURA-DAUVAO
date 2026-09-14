@@ -2,6 +2,7 @@ import os
 import json
 import re
 import sqlite3
+import zipfile
 from datetime import datetime
 from io import BytesIO
 
@@ -13,6 +14,7 @@ from flask_login import (
 from werkzeug.security import generate_password_hash, check_password_hash
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 from reportlab.lib.pagesizes import A4, A5
 from reportlab.lib.units import mm
@@ -1364,6 +1366,245 @@ def partner_import_excel():
 
     flash(f"Đã thêm {created} đối tác mới" + (f", bỏ qua {skipped} đối tác đã có sẵn." if skipped else "."), "success")
     return redirect(url_for("partner_list"))
+
+
+# ---------- Tạo hàng loạt Hóa đơn/Phiếu giao hàng (nhiều khách, nhiều mặt hàng) ----------
+
+@app.route("/sales/bulk_template")
+@login_required
+def sales_bulk_template():
+    wb = Workbook()
+    font_name = "Arial"
+    header_fill = PatternFill(start_color="2E5266", end_color="2E5266", fill_type="solid")
+    header_font = Font(name=font_name, bold=True, color="FFFFFF", size=10)
+    title_font = Font(name=font_name, bold=True, size=13, color="2E5266")
+    note_font = Font(name=font_name, italic=True, size=9, color="C00000")
+    sample_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    thin = Side(style="thin", color="808080")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    ws1 = wb.active
+    ws1.title = "HoaDon"
+    ws1.merge_cells("A1:L1")
+    ws1["A1"] = "SHEET 1: THÔNG TIN TỪNG HÓA ĐƠN (mỗi dòng = 1 hóa đơn)"
+    ws1["A1"].font = title_font
+    ws1["A1"].alignment = center
+    ws1.merge_cells("A2:L2")
+    ws1["A2"] = ("Mã HĐ ở sheet này phải khớp với Mã HĐ ở sheet \"MatHang\" để hệ thống ghép đúng mặt hàng vào hóa đơn. "
+                 "Copy vùng dữ liệu (không lấy 2 dòng tiêu đề) dán vào ô \"Dán danh sách hóa đơn\" trên web.")
+    ws1["A2"].font = note_font
+    ws1["A2"].alignment = left
+    ws1.row_dimensions[2].height = 32
+    headers1 = ["Mã HĐ", "Loại (hoa_don/phieu_giao)", "Nhóm/Khách hàng", "Tên cơ sở bán",
+                "Mô tả ngắn", "Số HĐ", "Ngày lập (YYYY-MM-DD)", "Địa điểm",
+                "Họ tên người nhận", "Địa chỉ", "SĐT", "Đã thanh toán (chỉ phiếu giao)"]
+    widths1 = [8, 20, 20, 22, 24, 14, 16, 12, 20, 24, 12, 18]
+    hr1 = 4
+    for i, h in enumerate(headers1):
+        c = ws1.cell(row=hr1, column=1 + i, value=h)
+        c.font = header_font; c.fill = header_fill; c.border = border; c.alignment = center
+    sample1 = [
+        ["HD1", "phieu_giao", "TRAN TUAN ANH - VPP", "HKD NGUYEN THANH THUY", "", "01/05.09.HDBL/2026",
+         "2026-09-05", "Dong Nai", "TRAN TUAN ANH", "", "", 129450000],
+        ["HD2", "hoa_don", "NGUYEN VAN B - VLXD", "CUA HANG VLXD ABC", "", "", "2026-09-06", "TPHCM",
+         "NGUYEN VAN B", "Q1, TPHCM", "0909123456", ""],
+    ]
+    r = hr1 + 1
+    for row_data in sample1:
+        for i, val in enumerate(row_data):
+            c = ws1.cell(row=r, column=1 + i, value=val)
+            c.border = border; c.fill = sample_fill; c.font = Font(name=font_name, size=10); c.alignment = left
+        r += 1
+    for _ in range(20):
+        for col in range(1, len(headers1) + 1):
+            c = ws1.cell(row=r, column=col)
+            c.border = border; c.font = Font(name=font_name, size=10); c.alignment = left
+        r += 1
+    for i, w in enumerate(widths1):
+        ws1.column_dimensions[get_column_letter(i + 1)].width = w
+    ws1.freeze_panes = f"A{hr1+1}"
+
+    ws2 = wb.create_sheet("MatHang")
+    ws2.merge_cells("A1:F1")
+    ws2["A1"] = "SHEET 2: MẶT HÀNG CỦA TỪNG HÓA ĐƠN (mỗi dòng = 1 mặt hàng)"
+    ws2["A1"].font = title_font
+    ws2["A1"].alignment = center
+    ws2.merge_cells("A2:F2")
+    ws2["A2"] = ("Nhiều dòng có thể cùng 1 Mã HĐ (hóa đơn nhiều mặt hàng). Copy vùng dữ liệu dán vào ô "
+                 "\"Dán danh sách mặt hàng\" trên web.")
+    ws2["A2"].font = note_font
+    ws2["A2"].alignment = left
+    ws2.row_dimensions[2].height = 28
+    headers2 = ["Mã HĐ", "Tên hàng", "Quy cách", "ĐVT", "Số lượng", "Đơn giá"]
+    widths2 = [8, 26, 16, 10, 12, 14]
+    hr2 = 4
+    for i, h in enumerate(headers2):
+        c = ws2.cell(row=hr2, column=1 + i, value=h)
+        c.font = header_font; c.fill = header_fill; c.border = border; c.alignment = center
+    sample2 = [
+        ["HD1", "Bìa còng kiếng", "", "Thùng", 60, 620000],
+        ["HD1", "Bút Zebra mịn", "", "Hộp", 50, 370000],
+        ["HD2", "Xi măng Hà Tiên", "Bao 50kg", "Bao", 100, 89000],
+    ]
+    r = hr2 + 1
+    for row_data in sample2:
+        for i, val in enumerate(row_data):
+            c = ws2.cell(row=r, column=1 + i, value=val)
+            c.border = border; c.fill = sample_fill; c.font = Font(name=font_name, size=10); c.alignment = left
+        r += 1
+    for _ in range(30):
+        for col in range(1, len(headers2) + 1):
+            c = ws2.cell(row=r, column=col)
+            c.border = border; c.font = Font(name=font_name, size=10); c.alignment = left
+        r += 1
+    for i, w in enumerate(widths2):
+        ws2.column_dimensions[get_column_letter(i + 1)].width = w
+    ws2.freeze_panes = f"A{hr2+1}"
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(
+        buf, as_attachment=True, download_name="Mau_tao_hang_loat_hoa_don.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@app.route("/sales/bulk", methods=["GET", "POST"])
+@login_required
+def sales_bulk():
+    if request.method == "POST":
+        header_text = request.form.get("header_text", "")
+        item_text = request.form.get("item_text", "")
+        default_nhom = request.form.get("default_nhom", "").strip()
+
+        header_lines = [l for l in header_text.replace("\r\n", "\n").split("\n") if l.strip()]
+        item_lines = [l for l in item_text.replace("\r\n", "\n").split("\n") if l.strip()]
+
+        # Gom mặt hàng theo Mã HĐ
+        items_by_key = {}
+        item_errors = []
+        for idx, line in enumerate(item_lines, start=1):
+            cols = [c.strip() for c in line.split("\t")]
+            if len(cols) < 2 or not cols[0] or not cols[1]:
+                item_errors.append(f"Dòng mặt hàng {idx}: thiếu Mã HĐ hoặc Tên hàng")
+                continue
+            key = cols[0]
+            ten_hang = cols[1]
+            quy_cach = cols[2] if len(cols) > 2 else ""
+            dvt = cols[3] if len(cols) > 3 else ""
+            try:
+                so_luong = float(re.sub(r"[^\d.\-]", "", (cols[4] if len(cols) > 4 else "0").replace(",", "")) or 0)
+            except ValueError:
+                so_luong = 0
+            try:
+                don_gia = float(re.sub(r"[^\d.\-]", "", (cols[5] if len(cols) > 5 else "0").replace(",", "")) or 0)
+            except ValueError:
+                don_gia = 0
+            items_by_key.setdefault(key, []).append({
+                "ten_hang": ten_hang, "quy_cach": quy_cach, "dvt": dvt,
+                "so_luong": so_luong, "don_gia": don_gia,
+            })
+
+        db = get_db()
+        created_ids = []
+        header_errors = []
+        for idx, line in enumerate(header_lines, start=1):
+            cols = [c.strip() for c in line.split("\t")]
+            if len(cols) < 9 or not cols[0]:
+                header_errors.append(f"Dòng hóa đơn {idx}: thiếu cột (cần tối thiểu Mã HĐ đến Họ tên người nhận)")
+                continue
+            key = cols[0]
+            loai_raw = (cols[1] if len(cols) > 1 else "hoa_don").strip().lower()
+            loai_chung_tu = "phieu_giao" if loai_raw in ("phieu_giao", "phiếu giao", "phieu giao hang") else "hoa_don"
+            nhom = (cols[2] if len(cols) > 2 else "").strip() or default_nhom
+            seller_name = cols[3] if len(cols) > 3 else ""
+            seller_slogan = cols[4] if len(cols) > 4 else ""
+            so_hd = cols[5] if len(cols) > 5 else ""
+            ngay_raw = (cols[6] if len(cols) > 6 else "").strip()
+            ngay_lap = None
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+                try:
+                    ngay_lap = datetime.strptime(ngay_raw, fmt).strftime("%Y-%m-%d")
+                    break
+                except ValueError:
+                    continue
+            if not ngay_lap:
+                ngay_lap = datetime.now().strftime("%Y-%m-%d")
+            dia_diem = cols[7] if len(cols) > 7 else ""
+            buyer_name = cols[8] if len(cols) > 8 else ""
+            buyer_address = cols[9] if len(cols) > 9 else ""
+            buyer_phone = cols[10] if len(cols) > 10 else ""
+            try:
+                thanh_toan = float(re.sub(r"[^\d.\-]", "", (cols[11] if len(cols) > 11 else "0").replace(",", "")) or 0)
+            except (ValueError, IndexError):
+                thanh_toan = 0
+
+            if not seller_name or not buyer_name:
+                header_errors.append(f"Dòng hóa đơn {idx} (Mã {key}): thiếu Tên cơ sở bán hoặc Họ tên người nhận")
+                continue
+
+            invoice_items = items_by_key.get(key, [])
+            if not invoice_items:
+                header_errors.append(f"Dòng hóa đơn {idx} (Mã {key}): không tìm thấy mặt hàng nào khớp Mã HĐ này ở sheet MatHang")
+                continue
+
+            tong_cong = sum(it["so_luong"] * it["don_gia"] for it in invoice_items)
+
+            cur = db.execute(
+                """INSERT INTO sales_invoices
+                   (nhom, so_hd, ngay_lap, seller_name, seller_slogan,
+                    buyer_name, buyer_address, buyer_phone, dia_diem, tong_cong,
+                    loai_chung_tu, thanh_toan, nguoi_tao_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (nhom, so_hd, ngay_lap, seller_name, seller_slogan, buyer_name,
+                 buyer_address, buyer_phone, dia_diem, tong_cong, loai_chung_tu,
+                 thanh_toan, current_user.id),
+            )
+            invoice_id = cur.lastrowid
+            for stt, it in enumerate(invoice_items, start=1):
+                thanh_tien = it["so_luong"] * it["don_gia"]
+                db.execute(
+                    """INSERT INTO sales_invoice_items
+                       (invoice_id, stt, ten_hang, quy_cach, dvt, so_luong, don_gia, thanh_tien)
+                       VALUES (?,?,?,?,?,?,?,?)""",
+                    (invoice_id, stt, it["ten_hang"], it["quy_cach"], it["dvt"],
+                     it["so_luong"], it["don_gia"], thanh_tien),
+                )
+            created_ids.append(invoice_id)
+        db.commit()
+
+        all_errors = header_errors + item_errors
+        if created_ids:
+            flash(f"Đã tạo {len(created_ids)} hóa đơn/phiếu giao hàng.", "success")
+        if all_errors:
+            flash("Một số dòng bị bỏ qua: " + " | ".join(all_errors[:10]) +
+                  (f" (và {len(all_errors)-10} lỗi khác)" if len(all_errors) > 10 else ""), "danger")
+
+        if not created_ids:
+            return redirect(url_for("sales_bulk"))
+
+        # Xuất luôn 1 file ZIP chứa PDF (khổ A4) của tất cả hóa đơn vừa tạo
+        zip_buf = BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for inv_id in created_ids:
+                invoice = db.execute("SELECT * FROM sales_invoices WHERE id=?", (inv_id,)).fetchone()
+                items = db.execute(
+                    "SELECT * FROM sales_invoice_items WHERE invoice_id=? ORDER BY stt", (inv_id,)
+                ).fetchall()
+                pdf_buf = build_sales_invoice_pdf(invoice, items, page_size="a4")
+                safe_name = re.sub(r"[^\w\-. ]", "_", invoice["so_hd"] or f"HD{inv_id}")
+                zf.writestr(f"{safe_name}_{inv_id}.pdf", pdf_buf.getvalue())
+        zip_buf.seek(0)
+        return send_file(
+            zip_buf, as_attachment=True,
+            download_name=f"HoaDon_hangloat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+            mimetype="application/zip",
+        )
+
+    return render_template("sales_bulk.html")
 
 
 # ---------- Tạo hóa đơn bán hàng (in được, nhiều mặt hàng) ----------

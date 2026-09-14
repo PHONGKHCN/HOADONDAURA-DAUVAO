@@ -3,7 +3,9 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <a href="{{ url_for('sales_list') }}" class="btn btn-outline-secondary btn-sm">← Danh sách</a>
-  <div class="btn-group">
+  <div>
+  <a href="{{ url_for('sales_edit', invoice_id=invoice.id) }}" class="btn btn-outline-primary btn-sm">Sửa</a>
+  <div class="btn-group d-inline-block">
     <button type="button" class="btn btn-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
       ⬇ Xuất file
     </button>
@@ -13,6 +15,7 @@
       <li><a class="dropdown-item" href="{{ url_for('sales_docx', invoice_id=invoice.id, size='a4') }}">Word - Khổ A4</a></li>
       <li><a class="dropdown-item" href="{{ url_for('sales_docx', invoice_id=invoice.id, size='a5') }}">Word - Khổ A5 (để in)</a></li>
     </ul>
+  </div>
   </div>
 </div>
 

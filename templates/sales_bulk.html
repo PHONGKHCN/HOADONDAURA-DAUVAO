@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Tạo hàng loạt hóa đơn{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Tạo hàng loạt Hóa đơn / Phiếu giao hàng</h4>
+  <div>
+    <a href="{{ url_for('sales_bulk_template') }}" class="btn btn-outline-primary btn-sm">⬇ Tải file mẫu Excel</a>
+    <a href="{{ url_for('sales_list') }}" class="btn btn-outline-secondary btn-sm">← Danh sách</a>
+  </div>
+</div>
+
+<div class="alert alert-info">
+  <strong>Cách dùng:</strong> Tải file mẫu Excel (2 sheet: <code>HoaDon</code> và <code>MatHang</code>) →
+  điền dữ liệu → copy từng sheet dán vào đúng ô tương ứng bên dưới. Mỗi hóa đơn có thể có nhiều mặt hàng —
+  chỉ cần ghi cùng 1 <strong>Mã HĐ</strong> ở cả 2 sheet để hệ thống tự ghép đúng.
+  Sau khi tạo xong, hệ thống <strong>tự động xuất luôn 1 file ZIP</strong> chứa PDF (khổ A4) của tất cả
+  hóa đơn vừa tạo, đồng thời tất cả cũng xuất hiện trong danh sách "Tạo hóa đơn" như bình thường.
+</div>
+
+<form method="post">
+  <div class="mb-3">
+    <label class="form-label">Nhóm/Khách hàng mặc định (áp dụng cho dòng nào để trống cột Nhóm)</label>
+    <input type="text" name="default_nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD" style="max-width:420px;">
+  </div>
+
+  <div class="card p-3 mb-3">
+    <h6 class="text-muted">Sheet 1 — Dán danh sách hóa đơn (mỗi dòng = 1 hóa đơn)</h6>
+    <div class="small text-muted mb-2">
+      Mã HĐ | Loại (hoa_don/phieu_giao) | Nhóm | Tên cơ sở bán | Mô tả ngắn | Số HĐ | Ngày lập | Địa điểm |
+      Họ tên người nhận | Địa chỉ | SĐT | Đã thanh toán
+    </div>
+    <textarea name="header_text" class="form-control" rows="6" required
+              placeholder="HD1&#9;phieu_giao&#9;TRAN TUAN ANH - VPP&#9;HKD NGUYEN THANH THUY&#9;&#9;01/05.09.HDBL/2026&#9;2026-09-05&#9;Dong Nai&#9;TRAN TUAN ANH&#9;&#9;&#9;129450000
+HD2&#9;hoa_don&#9;NGUYEN VAN B - VLXD&#9;CUA HANG VLXD ABC&#9;&#9;&#9;2026-09-06&#9;TPHCM&#9;NGUYEN VAN B&#9;Q1, TPHCM&#9;0909123456&#9;"></textarea>
+  </div>
+
+  <div class="card p-3 mb-3">
+    <h6 class="text-muted">Sheet 2 — Dán danh sách mặt hàng (mỗi dòng = 1 mặt hàng)</h6>
+    <div class="small text-muted mb-2">Mã HĐ | Tên hàng | Quy cách | ĐVT | Số lượng | Đơn giá</div>
+    <textarea name="item_text" class="form-control" rows="6" required
+              placeholder="HD1&#9;Bìa còng kiếng&#9;&#9;Thùng&#9;60&#9;620000
+HD1&#9;Bút Zebra mịn&#9;&#9;Hộp&#9;50&#9;370000
+HD2&#9;Xi măng Hà Tiên&#9;Bao 50kg&#9;Bao&#9;100&#9;89000"></textarea>
+  </div>
+
+  <button type="submit" class="btn btn-success">Tạo tất cả và tải ZIP</button>
+  <a href="{{ url_for('sales_list') }}" class="btn btn-outline-secondary">Hủy</a>
+</form>
+{% endblock %}
