@@ -23,6 +23,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepTogether,
+    Image as ReportLabImage,
 )
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -175,6 +176,29 @@ def init_db():
             db.execute(f"ALTER TABLE sales_invoices ADD COLUMN {col} TEXT")
     if "thanh_toan" not in sales_cols:
         db.execute("ALTER TABLE sales_invoices ADD COLUMN thanh_toan REAL DEFAULT 0")
+    if "template_id" not in sales_cols:
+        db.execute("ALTER TABLE sales_invoices ADD COLUMN template_id INTEGER")
+    db.commit()
+
+    # Bảng mẫu hóa đơn tùy chỉnh — mỗi khách hàng/nhóm có thể có mẫu riêng
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS invoice_templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nhom TEXT,
+            ten_mau TEXT NOT NULL,
+            tieu_de TEXT NOT NULL DEFAULT 'HÓA ĐƠN BÁN LẺ',
+            co_quoc_hieu INTEGER NOT NULL DEFAULT 1,
+            vi_tri_ngay TEXT NOT NULL DEFAULT 'cuoi',
+            kieu_footer TEXT NOT NULL DEFAULT 'bang_chu',
+            nhan_ky_trai TEXT NOT NULL DEFAULT 'Khách hàng',
+            nhan_ky_phai TEXT NOT NULL DEFAULT 'Người bán hàng',
+            in_ten_ben_ban_duoi_ky INTEGER NOT NULL DEFAULT 0,
+            logo_filename TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        """
+    )
     db.commit()
 
     # Seed one admin account if no users exist yet
@@ -1586,7 +1610,9 @@ def sales_bulk():
         if not created_ids:
             return redirect(url_for("sales_bulk"))
 
-        # Xuất luôn 1 file ZIP chứa PDF (khổ A4) của tất cả hóa đơn vừa tạo
+        # Xuất luôn 1 file ZIP chứa PDF và/hoặc Word (khổ A4) của tất cả hóa đơn vừa tạo,
+        # theo định dạng người dùng chọn.
+        export_format = request.form.get("export_format", "pdf")  # 'pdf' | 'docx' | 'both'
         zip_buf = BytesIO()
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for inv_id in created_ids:
@@ -1594,9 +1620,13 @@ def sales_bulk():
                 items = db.execute(
                     "SELECT * FROM sales_invoice_items WHERE invoice_id=? ORDER BY stt", (inv_id,)
                 ).fetchall()
-                pdf_buf = build_sales_invoice_pdf(invoice, items, page_size="a4")
                 safe_name = re.sub(r"[^\w\-. ]", "_", invoice["so_hd"] or f"HD{inv_id}")
-                zf.writestr(f"{safe_name}_{inv_id}.pdf", pdf_buf.getvalue())
+                if export_format in ("pdf", "both"):
+                    pdf_buf = build_sales_invoice_pdf(invoice, items, page_size="a4")
+                    zf.writestr(f"{safe_name}_{inv_id}.pdf", pdf_buf.getvalue())
+                if export_format in ("docx", "both"):
+                    docx_buf = build_sales_invoice_docx(invoice, items, page_size="a4")
+                    zf.writestr(f"{safe_name}_{inv_id}.docx", docx_buf.getvalue())
         zip_buf.seek(0)
         return send_file(
             zip_buf, as_attachment=True,
@@ -1605,6 +1635,124 @@ def sales_bulk():
         )
 
     return render_template("sales_bulk.html")
+
+
+# ---------- Mẫu hóa đơn tùy chỉnh (mỗi khách hàng/nhóm 1 mẫu riêng) ----------
+
+LOGO_DIR = os.path.join(os.path.dirname(__file__), "static", "logos")
+os.makedirs(LOGO_DIR, exist_ok=True)
+
+
+@app.route("/invoice_templates")
+@login_required
+def template_list():
+    db = get_db()
+    templates = db.execute("SELECT * FROM invoice_templates ORDER BY nhom, ten_mau").fetchall()
+    return render_template("template_list.html", templates=templates)
+
+
+@app.route("/invoice_templates/new", methods=["GET", "POST"])
+@login_required
+def template_new():
+    if request.method == "POST":
+        f = request.form
+        logo_filename = None
+        file = request.files.get("logo_file")
+        if file and file.filename:
+            ext = os.path.splitext(file.filename)[1].lower()
+            if ext in (".png", ".jpg", ".jpeg"):
+                logo_filename = f"logo_{datetime.now().strftime('%Y%m%d%H%M%S%f')}{ext}"
+                file.save(os.path.join(LOGO_DIR, logo_filename))
+            else:
+                flash("Logo chỉ nhận file .png, .jpg, .jpeg — đã bỏ qua logo.", "danger")
+
+        db = get_db()
+        db.execute(
+            """INSERT INTO invoice_templates
+               (nhom, ten_mau, tieu_de, co_quoc_hieu, vi_tri_ngay, kieu_footer,
+                nhan_ky_trai, nhan_ky_phai, in_ten_ben_ban_duoi_ky, logo_filename)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                f.get("nhom", "").strip(), f.get("ten_mau", "").strip(),
+                f.get("tieu_de", "HÓA ĐƠN BÁN LẺ").strip(),
+                1 if f.get("co_quoc_hieu") else 0,
+                f.get("vi_tri_ngay", "cuoi"), f.get("kieu_footer", "bang_chu"),
+                f.get("nhan_ky_trai", "Khách hàng").strip() or "Khách hàng",
+                f.get("nhan_ky_phai", "Người bán hàng").strip() or "Người bán hàng",
+                1 if f.get("in_ten_ben_ban_duoi_ky") else 0,
+                logo_filename,
+            ),
+        )
+        db.commit()
+        flash("Đã lưu mẫu hóa đơn.", "success")
+        return redirect(url_for("template_list"))
+    return render_template("template_form.html", tmpl=None)
+
+
+@app.route("/invoice_templates/<int:template_id>/edit", methods=["GET", "POST"])
+@login_required
+def template_edit(template_id):
+    db = get_db()
+    tmpl = db.execute("SELECT * FROM invoice_templates WHERE id=?", (template_id,)).fetchone()
+    if not tmpl:
+        flash("Không tìm thấy mẫu.", "danger")
+        return redirect(url_for("template_list"))
+
+    if request.method == "POST":
+        f = request.form
+        logo_filename = tmpl["logo_filename"]
+        if f.get("remove_logo"):
+            if logo_filename:
+                try:
+                    os.remove(os.path.join(LOGO_DIR, logo_filename))
+                except OSError:
+                    pass
+            logo_filename = None
+        file = request.files.get("logo_file")
+        if file and file.filename:
+            ext = os.path.splitext(file.filename)[1].lower()
+            if ext in (".png", ".jpg", ".jpeg"):
+                logo_filename = f"logo_{datetime.now().strftime('%Y%m%d%H%M%S%f')}{ext}"
+                file.save(os.path.join(LOGO_DIR, logo_filename))
+            else:
+                flash("Logo chỉ nhận file .png, .jpg, .jpeg — giữ nguyên logo cũ.", "danger")
+
+        db.execute(
+            """UPDATE invoice_templates SET
+               nhom=?, ten_mau=?, tieu_de=?, co_quoc_hieu=?, vi_tri_ngay=?, kieu_footer=?,
+               nhan_ky_trai=?, nhan_ky_phai=?, in_ten_ben_ban_duoi_ky=?, logo_filename=?
+               WHERE id=?""",
+            (
+                f.get("nhom", "").strip(), f.get("ten_mau", "").strip(),
+                f.get("tieu_de", "HÓA ĐƠN BÁN LẺ").strip(),
+                1 if f.get("co_quoc_hieu") else 0,
+                f.get("vi_tri_ngay", "cuoi"), f.get("kieu_footer", "bang_chu"),
+                f.get("nhan_ky_trai", "Khách hàng").strip() or "Khách hàng",
+                f.get("nhan_ky_phai", "Người bán hàng").strip() or "Người bán hàng",
+                1 if f.get("in_ten_ben_ban_duoi_ky") else 0,
+                logo_filename, template_id,
+            ),
+        )
+        db.commit()
+        flash("Đã cập nhật mẫu.", "success")
+        return redirect(url_for("template_list"))
+    return render_template("template_form.html", tmpl=tmpl)
+
+
+@app.route("/invoice_templates/<int:template_id>/delete", methods=["POST"])
+@login_required
+def template_delete(template_id):
+    db = get_db()
+    tmpl = db.execute("SELECT * FROM invoice_templates WHERE id=?", (template_id,)).fetchone()
+    if tmpl and tmpl["logo_filename"]:
+        try:
+            os.remove(os.path.join(LOGO_DIR, tmpl["logo_filename"]))
+        except OSError:
+            pass
+    db.execute("DELETE FROM invoice_templates WHERE id=?", (template_id,))
+    db.commit()
+    flash("Đã xóa mẫu.", "success")
+    return redirect(url_for("template_list"))
 
 
 # ---------- Tạo hóa đơn bán hàng (in được, nhiều mặt hàng) ----------
@@ -1664,13 +1812,14 @@ def sales_new():
 
         partners_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM partners ORDER BY nhom, loai, ten").fetchall()])
         products_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM products ORDER BY nhom, ten").fetchall()])
+        templates_json = json.dumps([dict(t) for t in db.execute("SELECT * FROM invoice_templates ORDER BY nhom, ten_mau").fetchall()])
 
         if not items:
             flash("Cần ít nhất 1 mặt hàng.", "danger")
             return render_template(
                 "sales_form.html", invoice=None, items=[],
                 today=datetime.now().strftime("%Y-%m-%d"), partners_json=partners_json,
-                products_json=products_json,
+                products_json=products_json, templates_json=templates_json,
             )
 
         nhom = f.get("nhom", "").strip()
@@ -1685,18 +1834,22 @@ def sales_new():
             thanh_toan = float(f.get("thanh_toan") or 0)
         except ValueError:
             thanh_toan = 0
+        try:
+            template_id = int(f.get("template_id")) if f.get("template_id") else None
+        except ValueError:
+            template_id = None
 
         cur = db.execute(
             """INSERT INTO sales_invoices
                (nhom, so_hd, ngay_lap, seller_name, seller_slogan,
                 buyer_name, buyer_address, buyer_phone, dia_diem, tong_cong,
-                loai_chung_tu, thanh_toan, nguoi_tao_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                loai_chung_tu, thanh_toan, template_id, nguoi_tao_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 nhom, f.get("so_hd", "").strip(), f.get("ngay_lap"),
                 seller_name, seller_slogan, buyer_name,
                 buyer_address, buyer_phone, dia_diem, tong_cong,
-                loai_chung_tu, thanh_toan, current_user.id,
+                loai_chung_tu, thanh_toan, template_id, current_user.id,
             ),
         )
         invoice_id = cur.lastrowid
@@ -1737,10 +1890,11 @@ def sales_new():
 
     partners_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM partners ORDER BY nhom, loai, ten").fetchall()])
     products_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM products ORDER BY nhom, ten").fetchall()])
+    templates_json = json.dumps([dict(t) for t in db.execute("SELECT * FROM invoice_templates ORDER BY nhom, ten_mau").fetchall()])
     return render_template(
         "sales_form.html", invoice=None, items=[],
         today=datetime.now().strftime("%Y-%m-%d"), partners_json=partners_json,
-        products_json=products_json,
+        products_json=products_json, templates_json=templates_json,
     )
 
 
@@ -1787,19 +1941,23 @@ def sales_edit(invoice_id):
             thanh_toan = float(f.get("thanh_toan") or 0)
         except ValueError:
             thanh_toan = 0
+        try:
+            template_id = int(f.get("template_id")) if f.get("template_id") else None
+        except ValueError:
+            template_id = None
 
         db.execute(
             """UPDATE sales_invoices SET
                nhom=?, so_hd=?, ngay_lap=?, seller_name=?, seller_slogan=?,
                buyer_name=?, buyer_address=?, buyer_phone=?, dia_diem=?, tong_cong=?,
-               loai_chung_tu=?, thanh_toan=?
+               loai_chung_tu=?, thanh_toan=?, template_id=?
                WHERE id=?""",
             (
                 f.get("nhom", "").strip(), f.get("so_hd", "").strip(), f.get("ngay_lap"),
                 f.get("seller_name", "").strip(), f.get("seller_slogan", "").strip(),
                 f.get("buyer_name", "").strip(), f.get("buyer_address", "").strip(),
                 f.get("buyer_phone", "").strip(), f.get("dia_diem", "").strip(), tong_cong,
-                f.get("loai_chung_tu", "hoa_don"), thanh_toan, invoice_id,
+                f.get("loai_chung_tu", "hoa_don"), thanh_toan, template_id, invoice_id,
             ),
         )
         db.execute("DELETE FROM sales_invoice_items WHERE invoice_id=?", (invoice_id,))
@@ -1820,9 +1978,11 @@ def sales_edit(invoice_id):
     ).fetchall()]
     partners_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM partners ORDER BY nhom, loai, ten").fetchall()])
     products_json = json.dumps([dict(p) for p in db.execute("SELECT * FROM products ORDER BY nhom, ten").fetchall()])
+    templates_json = json.dumps([dict(t) for t in db.execute("SELECT * FROM invoice_templates ORDER BY nhom, ten_mau").fetchall()])
     return render_template(
         "sales_form.html", invoice=invoice, items=items,
         today=invoice["ngay_lap"], partners_json=partners_json, products_json=products_json,
+        templates_json=templates_json,
     )
 
 
@@ -1837,8 +1997,9 @@ def sales_view(invoice_id):
     items = db.execute(
         "SELECT * FROM sales_invoice_items WHERE invoice_id=? ORDER BY stt", (invoice_id,)
     ).fetchall()
+    cfg = get_template_config(invoice)
     return render_template(
-        "sales_view.html", invoice=invoice, items=items,
+        "sales_view.html", invoice=invoice, items=items, cfg=cfg,
         so_tien_chu=so_thanh_chu(invoice["tong_cong"]),
     )
 
@@ -1852,6 +2013,40 @@ def sales_delete(invoice_id):
     db.commit()
     flash("Đã xóa hóa đơn.", "success")
     return redirect(url_for("sales_list"))
+
+
+def get_template_config(invoice):
+    """Trả về cấu hình trình bày hóa đơn — ưu tiên mẫu tùy chỉnh (invoice_templates)
+    nếu hóa đơn có gắn template_id, nếu không thì dùng mặc định theo loai_chung_tu
+    (giữ tương thích ngược với các hóa đơn tạo trước khi có tính năng mẫu tùy chỉnh)."""
+    tmpl_id = invoice["template_id"] if "template_id" in invoice.keys() else None
+    if tmpl_id:
+        db = get_db()
+        t = db.execute("SELECT * FROM invoice_templates WHERE id=?", (tmpl_id,)).fetchone()
+        if t:
+            return {
+                "tieu_de": t["tieu_de"],
+                "co_quoc_hieu": bool(t["co_quoc_hieu"]),
+                "vi_tri_ngay": t["vi_tri_ngay"],
+                "kieu_footer": t["kieu_footer"],
+                "nhan_ky_trai": t["nhan_ky_trai"],
+                "nhan_ky_phai": t["nhan_ky_phai"],
+                "in_ten_ben_ban_duoi_ky": bool(t["in_ten_ben_ban_duoi_ky"]),
+                "logo_filename": t["logo_filename"],
+                "hien_thi_bang_giao": False,
+            }
+    is_phieu = invoice["loai_chung_tu"] == "phieu_giao"
+    if is_phieu:
+        return {
+            "tieu_de": "PHIẾU GIAO HÀNG", "co_quoc_hieu": True, "vi_tri_ngay": "dau",
+            "kieu_footer": "thanh_toan", "nhan_ky_trai": "BÊN GIAO", "nhan_ky_phai": "KHÁCH HÀNG",
+            "in_ten_ben_ban_duoi_ky": True, "logo_filename": None, "hien_thi_bang_giao": True,
+        }
+    return {
+        "tieu_de": "HÓA ĐƠN BÁN LẺ", "co_quoc_hieu": True, "vi_tri_ngay": "cuoi",
+        "kieu_footer": "bang_chu", "nhan_ky_trai": "Khách hàng", "nhan_ky_phai": "Người bán hàng",
+        "in_ten_ben_ban_duoi_ky": False, "logo_filename": None, "hien_thi_bang_giao": False,
+    }
 
 
 def build_sales_invoice_pdf(invoice, items, page_size="a4"):
@@ -1887,16 +2082,40 @@ def build_sales_invoice_pdf(invoice, items, page_size="a4"):
 
     story = []
 
+    cfg = get_template_config(invoice)
     left_w = 68 * mm if is_a5 else 75 * mm
     right_w = 62 * mm if is_a5 else 95 * mm
 
-    left_cell = [Paragraph(f"CƠ SỞ {invoice['seller_name'] or ''}".upper(), style_bold)]
+    logo_path = None
+    if cfg["logo_filename"]:
+        candidate = os.path.join(LOGO_DIR, cfg["logo_filename"])
+        if os.path.exists(candidate):
+            logo_path = candidate
+
+    left_cell = []
+    if logo_path:
+        try:
+            img = ReportLabImage(logo_path)
+            max_h = 16 * mm
+            ratio = max_h / img.drawHeight
+            img.drawHeight = max_h
+            img.drawWidth = img.drawWidth * ratio
+            left_cell.append(img)
+            left_cell.append(Spacer(1, 3))
+        except Exception:
+            pass
+    left_cell.append(Paragraph(f"CƠ SỞ {invoice['seller_name'] or ''}".upper(), style_bold))
     if invoice["seller_slogan"]:
         left_cell.append(Paragraph(invoice["seller_slogan"], style_slogan))
-    right_cell = [
-        Paragraph("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT\u00A0NAM", style_quochieu),
-        Paragraph("<u>Độc lập – Tự do – Hạnh Phúc</u>", style_quochieu),
-    ]
+
+    if cfg["co_quoc_hieu"]:
+        right_cell = [
+            Paragraph("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT\u00A0NAM", style_quochieu),
+            Paragraph("<u>Độc lập – Tự do – Hạnh Phúc</u>", style_quochieu),
+        ]
+    else:
+        right_cell = [Paragraph("", style_quochieu)]
+
     header_table = Table([[left_cell, right_cell]], colWidths=[left_w, right_w])
     header_table.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -1906,19 +2125,21 @@ def build_sales_invoice_pdf(invoice, items, page_size="a4"):
     story.append(header_table)
     story.append(Spacer(1, 10 if is_a5 else 14))
 
-    is_phieu = invoice["loai_chung_tu"] == "phieu_giao"
+    story.append(Paragraph(cfg["tieu_de"], style_title))
 
-    story.append(Paragraph("PHIẾU GIAO HÀNG" if is_phieu else "HÓA ĐƠN BÁN LẺ", style_title))
-    if is_phieu:
-        ngay_str_top = invoice["ngay_lap"]
+    def _ngay_phrase(ngay_lap_str, dia_diem_str):
         try:
-            d0 = datetime.strptime(ngay_str_top, "%Y-%m-%d")
-            ngay_phrase_top = f"ngày {d0.day} tháng {d0.month:02d} năm {d0.year}"
+            d0 = datetime.strptime(ngay_lap_str, "%Y-%m-%d")
+            phrase = f"ngày {d0.day} tháng {d0.month:02d} năm {d0.year}"
         except Exception:
-            ngay_phrase_top = ngay_str_top
-        dia_diem_top = invoice["dia_diem"] or ""
-        dong_ngay_top = f"{dia_diem_top}, {ngay_phrase_top}" if dia_diem_top else ngay_phrase_top.capitalize()
+            phrase = ngay_lap_str
+        return f"{dia_diem_str}, {phrase}" if dia_diem_str else phrase.capitalize()
+
+    if cfg["vi_tri_ngay"] == "dau":
+        dong_ngay_top = _ngay_phrase(invoice["ngay_lap"], invoice["dia_diem"] or "")
         story.append(Paragraph(f"<i>{dong_ngay_top}</i>", style_center))
+        if invoice["so_hd"]:
+            story.append(Paragraph(f"Số: {invoice['so_hd']}", style_center))
     elif invoice["so_hd"]:
         story.append(Paragraph(f"Số: {invoice['so_hd']}", style_center))
     story.append(Spacer(1, 8 if is_a5 else 10))
@@ -1926,7 +2147,7 @@ def build_sales_invoice_pdf(invoice, items, page_size="a4"):
     story.append(Paragraph(f"- Họ và tên người nhận hàng: {invoice['buyer_name']}", style_normal))
     story.append(Paragraph(f"- Địa chỉ: {invoice['buyer_address'] or ''}", style_normal))
     story.append(Paragraph(f"- Số điện thoại: {invoice['buyer_phone'] or ''}", style_normal))
-    if is_phieu:
+    if cfg["hien_thi_bang_giao"]:
         story.append(Paragraph(
             "<i>Tôi/chúng tôi tiến hành bàn giao cho Ông/Bà hàng hóa theo bảng kê dưới đây:</i>",
             style_normal,
@@ -1983,37 +2204,30 @@ def build_sales_invoice_pdf(invoice, items, page_size="a4"):
     so_chu = so_thanh_chu(invoice["tong_cong"])
     footer_block = []
 
-    if is_phieu:
+    if cfg["kieu_footer"] == "thanh_toan":
         thanh_toan = float(invoice["thanh_toan"] or 0)
         con_lai = invoice["tong_cong"] - thanh_toan
         footer_block.append(Paragraph(f"- Tổng số tiền: <b>{invoice['tong_cong']:,.0f} đồng</b>", style_normal))
         footer_block.append(Paragraph(f"- Thanh toán: <b>{thanh_toan:,.0f} đồng</b>", style_normal))
         footer_block.append(Paragraph(f"- Còn lại: <b>{con_lai:,.0f} đồng</b>", style_red))
-    else:
+    elif cfg["kieu_footer"] == "bang_chu":
         footer_block.append(Paragraph(
             f"Thành tiền: {invoice['tong_cong']:,.0f} đồng (Bằng chữ: <i>{so_chu.rstrip('.')}</i>).",
             style_red,
         ))
     footer_block.append(Spacer(1, 6 if is_a5 else 8))
 
-    ngay_str = invoice["ngay_lap"]
-    try:
-        d = datetime.strptime(ngay_str, "%Y-%m-%d")
-        ngay_phrase = f"ngày {d.day} tháng {d.month} năm {d.year}"
-    except Exception:
-        ngay_phrase = ngay_str
-    dia_diem = invoice["dia_diem"] or ""
-    dòng_ngay = f"{dia_diem}, {ngay_phrase}" if dia_diem else ngay_phrase.capitalize()
-    if not is_phieu:
+    if cfg["vi_tri_ngay"] == "cuoi":
+        dòng_ngay = _ngay_phrase(invoice["ngay_lap"], invoice["dia_diem"] or "")
         footer_block.append(Paragraph(dòng_ngay, style_right))
     footer_block.append(Spacer(1, 16 if is_a5 else 20))
 
-    if is_phieu:
-        sig_table = Table(
-            [[Paragraph("BÊN GIAO", style_center), Paragraph("KHÁCH HÀNG", style_center)]],
-            colWidths=[left_w, right_w],
-        )
-        footer_block.append(sig_table)
+    sig_table = Table(
+        [[Paragraph(cfg["nhan_ky_trai"], style_center), Paragraph(cfg["nhan_ky_phai"], style_center)]],
+        colWidths=[left_w, right_w],
+    )
+    footer_block.append(sig_table)
+    if cfg["in_ten_ben_ban_duoi_ky"]:
         footer_block.append(Spacer(1, 30 if is_a5 else 40))
         name_table = Table(
             [[Paragraph(invoice["seller_name"] or "", style_bold), Paragraph("", style_center)]],
@@ -2021,12 +2235,6 @@ def build_sales_invoice_pdf(invoice, items, page_size="a4"):
         )
         name_table.setStyle(TableStyle([("ALIGN", (0, 0), (0, 0), "CENTER")]))
         footer_block.append(name_table)
-    else:
-        sig_table = Table(
-            [[Paragraph("Khách hàng", style_center), Paragraph("Người bán hàng", style_center)]],
-            colWidths=[left_w, right_w],
-        )
-        footer_block.append(sig_table)
 
     story.append(KeepTogether(footer_block))
 
@@ -2079,6 +2287,13 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
     fs_title = 15 if is_a5 else 18
     fs_cell = 8 if is_a5 else 10
 
+    cfg = get_template_config(invoice)
+    logo_path = None
+    if cfg["logo_filename"]:
+        candidate = os.path.join(LOGO_DIR, cfg["logo_filename"])
+        if os.path.exists(candidate):
+            logo_path = candidate
+
     # Header: bảng 1 dòng 2 cột — trái tên cơ sở, phải quốc hiệu
     header_table = docx_doc.add_table(rows=1, cols=2)
     header_table.autofit = False
@@ -2091,40 +2306,52 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
     left_cell.width = left_w_docx
     right_cell.width = right_w_docx
 
-    p1 = left_cell.paragraphs[0]
+    if logo_path:
+        p_logo = left_cell.paragraphs[0]
+        run_logo = p_logo.add_run()
+        try:
+            run_logo.add_picture(logo_path, height=Mm(14))
+        except Exception:
+            pass
+        p1 = left_cell.add_paragraph()
+    else:
+        p1 = left_cell.paragraphs[0]
     _set_run(p1, f"CƠ SỞ {(invoice['seller_name'] or '').upper()}", bold=True, size=fs + 1)
     if invoice["seller_slogan"]:
         p1b = left_cell.add_paragraph()
         _set_run(p1b, invoice["seller_slogan"], size=fs - 1)
 
-    p2 = right_cell.paragraphs[0]
-    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_run(p2, "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT\u00A0NAM", bold=True, size=fs)
-    p3 = right_cell.add_paragraph()
-    p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_run(p3, "Độc lập – Tự do – Hạnh Phúc", bold=True, size=fs, underline=True)
+    if cfg["co_quoc_hieu"]:
+        p2 = right_cell.paragraphs[0]
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_run(p2, "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT\u00A0NAM", bold=True, size=fs)
+        p3 = right_cell.add_paragraph()
+        p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        _set_run(p3, "Độc lập – Tự do – Hạnh Phúc", bold=True, size=fs, underline=True)
 
     docx_doc.add_paragraph()
 
-    is_phieu = invoice["loai_chung_tu"] == "phieu_giao"
+    def _ngay_phrase_docx(ngay_lap_str, dia_diem_str):
+        try:
+            d0 = datetime.strptime(ngay_lap_str, "%Y-%m-%d")
+            phrase = f"ngày {d0.day} tháng {d0.month:02d} năm {d0.year}"
+        except Exception:
+            phrase = ngay_lap_str
+        return f"{dia_diem_str}, {phrase}" if dia_diem_str else phrase.capitalize()
 
     p_title = docx_doc.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_run(p_title, "PHIẾU GIAO HÀNG" if is_phieu else "HÓA ĐƠN BÁN LẺ", bold=True, size=fs_title)
+    _set_run(p_title, cfg["tieu_de"], bold=True, size=fs_title)
 
-    ngay_str_top = invoice["ngay_lap"]
-    try:
-        d0 = datetime.strptime(ngay_str_top, "%Y-%m-%d")
-        ngay_phrase_top = f"ngày {d0.day} tháng {d0.month:02d} năm {d0.year}"
-    except Exception:
-        ngay_phrase_top = ngay_str_top
-    dia_diem_top = invoice["dia_diem"] or ""
-    dong_ngay_top = f"{dia_diem_top}, {ngay_phrase_top}" if dia_diem_top else ngay_phrase_top.capitalize()
-
-    if is_phieu:
+    if cfg["vi_tri_ngay"] == "dau":
+        dong_ngay_top = _ngay_phrase_docx(invoice["ngay_lap"], invoice["dia_diem"] or "")
         p_so = docx_doc.add_paragraph()
         p_so.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _set_run(p_so, dong_ngay_top, italic=True, size=fs)
+        if invoice["so_hd"]:
+            p_sohd = docx_doc.add_paragraph()
+            p_sohd.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _set_run(p_sohd, f"Số: {invoice['so_hd']}", size=fs)
     elif invoice["so_hd"]:
         p_so = docx_doc.add_paragraph()
         p_so.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -2140,7 +2367,7 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
         pb = docx_doc.add_paragraph()
         _set_run(pb, line, size=fs)
 
-    if is_phieu:
+    if cfg["hien_thi_bang_giao"]:
         p_transition = docx_doc.add_paragraph()
         _set_run(p_transition, "Tôi/chúng tôi tiến hành bàn giao cho Ông/Bà hàng hóa theo bảng kê dưới đây:",
                   italic=True, size=fs)
@@ -2191,7 +2418,7 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
     docx_doc.add_paragraph()
     so_chu = so_thanh_chu(invoice["tong_cong"])
 
-    if is_phieu:
+    if cfg["kieu_footer"] == "thanh_toan":
         thanh_toan = float(invoice["thanh_toan"] or 0)
         con_lai = invoice["tong_cong"] - thanh_toan
         p_tong = docx_doc.add_paragraph()
@@ -2203,7 +2430,7 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
         p_conlai = docx_doc.add_paragraph()
         p_conlai.paragraph_format.keep_with_next = True
         _set_run(p_conlai, f"- Còn lại: {con_lai:,.0f} đồng", bold=True, size=fs)
-    else:
+    elif cfg["kieu_footer"] == "bang_chu":
         p_total = docx_doc.add_paragraph()
         p_total.paragraph_format.keep_with_next = True
         _set_run(
@@ -2212,15 +2439,8 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
             bold=True, size=fs,
         )
 
-    ngay_str = invoice["ngay_lap"]
-    try:
-        d = datetime.strptime(ngay_str, "%Y-%m-%d")
-        ngay_phrase = f"ngày {d.day} tháng {d.month} năm {d.year}"
-    except Exception:
-        ngay_phrase = ngay_str
-    dia_diem = invoice["dia_diem"] or ""
-    dòng_ngay = f"{dia_diem}, {ngay_phrase}" if dia_diem else ngay_phrase.capitalize()
-    if not is_phieu:
+    if cfg["vi_tri_ngay"] == "cuoi":
+        dòng_ngay = _ngay_phrase_docx(invoice["ngay_lap"], invoice["dia_diem"] or "")
         p_ngay = docx_doc.add_paragraph()
         p_ngay.alignment = WD_ALIGN_PARAGRAPH.RIGHT
         p_ngay.paragraph_format.keep_with_next = True
@@ -2240,17 +2460,14 @@ def build_sales_invoice_docx(invoice, items, page_size="a4"):
     right_sig.width = right_w_docx
     left_sig.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
     right_sig.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if is_phieu:
-        _set_run(left_sig.paragraphs[0], "BÊN GIAO", bold=True, size=fs)
-        _set_run(right_sig.paragraphs[0], "KHÁCH HÀNG", bold=True, size=fs)
+    _set_run(left_sig.paragraphs[0], cfg["nhan_ky_trai"], bold=True, size=fs)
+    _set_run(right_sig.paragraphs[0], cfg["nhan_ky_phai"], bold=True, size=fs)
+    if cfg["in_ten_ben_ban_duoi_ky"]:
         for _ in range(3):
             docx_doc.add_paragraph()
         p_name = docx_doc.add_paragraph()
         p_name.alignment = WD_ALIGN_PARAGRAPH.LEFT
         _set_run(p_name, invoice["seller_name"] or "", bold=True, size=fs)
-    else:
-        _set_run(left_sig.paragraphs[0], "Khách hàng", bold=True, size=fs)
-        _set_run(right_sig.paragraphs[0], "Người bán hàng", bold=True, size=fs)
 
     buf = BytesIO()
     docx_doc.save(buf)

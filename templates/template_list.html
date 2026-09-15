@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Mẫu hóa đơn{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">Mẫu hóa đơn tùy chỉnh (theo từng khách hàng)</h4>
+  <a href="{{ url_for('template_new') }}" class="btn btn-primary btn-sm">+ Thêm mẫu mới</a>
+</div>
+
+<div class="alert alert-info small">
+  Mỗi mẫu có thể gắn với 1 Nhóm/Khách hàng cụ thể — khi tạo hóa đơn cho đúng nhóm đó, mẫu sẽ tự xuất hiện
+  trong danh sách chọn. Có thể để trống Nhóm nếu muốn dùng mẫu này cho nhiều khách khác nhau.
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Logo</th><th>Tên mẫu</th><th>Nhóm/Khách hàng</th><th>Tiêu đề</th>
+          <th>Quốc hiệu</th><th>Chân trang</th><th class="text-center">Thao tác</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in templates %}
+        <tr>
+          <td>
+            {% if t.logo_filename %}
+            <img src="{{ url_for('static', filename='logos/' + t.logo_filename) }}" style="height:32px;">
+            {% else %}<span class="text-muted small">Không có</span>{% endif %}
+          </td>
+          <td>{{ t.ten_mau }}</td>
+          <td>{{ t.nhom or "(dùng chung)" }}</td>
+          <td>{{ t.tieu_de }}</td>
+          <td>{{ "Có" if t.co_quoc_hieu else "Không" }}</td>
+          <td>{{ "Bằng chữ" if t.kieu_footer == "bang_chu" else ("Thanh toán/Còn lại" if t.kieu_footer == "thanh_toan" else "Không hiện") }}</td>
+          <td class="text-center">
+            <a href="{{ url_for('template_edit', template_id=t.id) }}" class="btn btn-sm btn-outline-secondary">Sửa</a>
+            <form method="post" action="{{ url_for('template_delete', template_id=t.id) }}" class="d-inline"
+                  onsubmit="return confirm('Xóa mẫu này?');">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Xóa</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-center text-muted py-4">Chưa có mẫu nào — dùng 2 mẫu mặc định (Hóa đơn bán lẻ / Phiếu giao hàng) khi tạo hóa đơn.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -17,6 +17,15 @@
              {{ "checked" if invoice and invoice.loai_chung_tu == "phieu_giao" }} onchange="toggleChungTu()">
       <label class="btn btn-outline-primary" for="loaiPhieu">Phiếu giao hàng</label>
     </div>
+    <div class="mt-3">
+      <label class="form-label small text-muted">
+        Hoặc dùng mẫu riêng đã lưu cho khách hàng (ghi đè kiểu trình bày ở trên) —
+        <a href="{{ url_for('template_list') }}" target="_blank">quản lý mẫu</a>
+      </label>
+      <select id="templateSelect" name="template_id" class="form-select">
+        <option value="">-- Không dùng mẫu riêng (theo Loại chứng từ ở trên) --</option>
+      </select>
+    </div>
   </div>
 
   <div class="card p-3 mb-3">
@@ -156,6 +165,8 @@
 let rowCount = 0;
 const ALL_PARTNERS = {{ partners_json | safe }};
 const ALL_PRODUCTS = {{ products_json | safe }};
+const ALL_TEMPLATES = {{ templates_json | safe }};
+const CURRENT_TEMPLATE_ID = {{ invoice.template_id if invoice and invoice.template_id else "null" }};
 
 function populateNhomList() {
   const nhoms = [...new Set([...ALL_PARTNERS, ...ALL_PRODUCTS].map(p => p.nhom).filter(n => n))];
@@ -202,9 +213,21 @@ function refreshPartnerSelects() {
     filtered.filter(p => p.loai === "buyer").map(p => `<option value="${p.id}">${p.ten}${p.nhom ? " (" + p.nhom + ")" : ""}</option>`).join("");
 }
 
+function refreshTemplateSelect() {
+  const nhom = document.getElementById("nhomInput").value.trim();
+  const filtered = nhom ? ALL_TEMPLATES.filter(t => t.nhom === nhom || !t.nhom) : ALL_TEMPLATES;
+  const sel = document.getElementById("templateSelect");
+  sel.innerHTML = '<option value="">-- Không dùng mẫu riêng (theo Loại chứng từ ở trên) --</option>' +
+    filtered.map(t => `<option value="${t.id}">${t.ten_mau}${t.nhom ? " (" + t.nhom + ")" : ""}</option>`).join("");
+  if (CURRENT_TEMPLATE_ID && filtered.some(t => t.id === CURRENT_TEMPLATE_ID)) {
+    sel.value = String(CURRENT_TEMPLATE_ID);
+  }
+}
+
 document.getElementById("nhomInput").addEventListener("input", function() {
   refreshPartnerSelects();
   refreshProductList();
+  refreshTemplateSelect();
 });
 
 document.getElementById("sellerSelect").addEventListener("change", function() {
@@ -228,6 +251,7 @@ document.getElementById("buyerSelect").addEventListener("change", function() {
 populateNhomList();
 refreshPartnerSelects();
 refreshProductList();
+refreshTemplateSelect();
 
 function addRow(data) {
   data = data || {};

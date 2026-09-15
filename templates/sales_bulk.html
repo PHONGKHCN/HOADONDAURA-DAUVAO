@@ -13,14 +13,25 @@
   <strong>Cách dùng:</strong> Tải file mẫu Excel (2 sheet: <code>HoaDon</code> và <code>MatHang</code>) →
   điền dữ liệu → copy từng sheet dán vào đúng ô tương ứng bên dưới. Mỗi hóa đơn có thể có nhiều mặt hàng —
   chỉ cần ghi cùng 1 <strong>Mã HĐ</strong> ở cả 2 sheet để hệ thống tự ghép đúng.
-  Sau khi tạo xong, hệ thống <strong>tự động xuất luôn 1 file ZIP</strong> chứa PDF (khổ A4) của tất cả
-  hóa đơn vừa tạo, đồng thời tất cả cũng xuất hiện trong danh sách "Tạo hóa đơn" như bình thường.
+  Sau khi tạo xong, hệ thống <strong>tự động xuất luôn 1 file ZIP</strong> chứa PDF và/hoặc Word
+  (theo định dạng bạn chọn bên dưới) của tất cả hóa đơn vừa tạo, đồng thời tất cả cũng xuất hiện
+  trong danh sách "Tạo hóa đơn" như bình thường.
 </div>
 
 <form method="post">
-  <div class="mb-3">
-    <label class="form-label">Nhóm/Khách hàng mặc định (áp dụng cho dòng nào để trống cột Nhóm)</label>
-    <input type="text" name="default_nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD" style="max-width:420px;">
+  <div class="row g-3 mb-3">
+    <div class="col-md-6">
+      <label class="form-label">Nhóm/Khách hàng mặc định (áp dụng cho dòng nào để trống cột Nhóm)</label>
+      <input type="text" name="default_nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Định dạng xuất trong file ZIP</label>
+      <select name="export_format" class="form-select">
+        <option value="pdf">PDF (khổ A4)</option>
+        <option value="docx">Word (khổ A4)</option>
+        <option value="both">Cả PDF và Word</option>
+      </select>
+    </div>
   </div>
 
   <div class="card p-3 mb-3">
@@ -43,7 +54,7 @@ HD1&#9;Bút Zebra mịn&#9;&#9;Hộp&#9;50&#9;370000
 HD2&#9;Xi măng Hà Tiên&#9;Bao 50kg&#9;Bao&#9;100&#9;89000"></textarea>
   </div>
 
-  <button type="submit" class="btn btn-success">Tạo tất cả và tải ZIP</button>
+  <button type="submit" class="btn btn-success">Tạo tất cả và tải file</button>
   <a href="{{ url_for('sales_list') }}" class="btn btn-outline-secondary">Hủy</a>
 </form>
 {% endblock %}

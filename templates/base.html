@@ -27,6 +27,7 @@
         <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}">Tổng quan</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('invoice_list') }}">Bảng kê</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('sales_list') }}">Tạo hóa đơn</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('template_list') }}">Mẫu hóa đơn</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('product_list') }}">Sản phẩm</a></li>
         <li class="nav-item"><a class="nav-link" href="{{ url_for('partner_list') }}">Đối tác</a></li>
         {% if current_user.is_admin %}

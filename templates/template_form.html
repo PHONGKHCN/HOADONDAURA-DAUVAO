@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}{{ "Sửa" if tmpl else "Thêm" }} mẫu hóa đơn{% endblock %}
+{% block content %}
+<h4 class="mb-3">{{ "Sửa mẫu hóa đơn" if tmpl else "Thêm mẫu hóa đơn mới" }}</h4>
+
+<form method="post" enctype="multipart/form-data" class="card p-4" style="max-width:640px;">
+  <div class="mb-3">
+    <label class="form-label">Tên mẫu (để bạn tự nhận biết) *</label>
+    <input type="text" name="ten_mau" class="form-control" required
+           placeholder="VD: Mau HKD Nguyen Thanh Thuy" value="{{ tmpl.ten_mau if tmpl else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Nhóm/Khách hàng gắn với mẫu này (để trống nếu dùng chung)</label>
+    <input type="text" name="nhom" class="form-control" placeholder="VD: Nguyen Van Do - VLXD"
+           value="{{ tmpl.nhom if tmpl else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Logo (tùy chọn, .png/.jpg)</label>
+    <input type="file" name="logo_file" accept=".png,.jpg,.jpeg" class="form-control">
+    {% if tmpl and tmpl.logo_filename %}
+    <div class="mt-2 d-flex align-items-center gap-2">
+      <img src="{{ url_for('static', filename='logos/' + tmpl.logo_filename) }}" style="height:40px;">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" name="remove_logo" id="removeLogo" value="1">
+        <label class="form-check-label small" for="removeLogo">Xóa logo hiện tại</label>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Tiêu đề hiển thị trên hóa đơn *</label>
+    <input type="text" name="tieu_de" class="form-control" required
+           value="{{ tmpl.tieu_de if tmpl else 'HÓA ĐƠN BÁN LẺ' }}">
+  </div>
+  <div class="form-check mb-3">
+    <input class="form-check-input" type="checkbox" name="co_quoc_hieu" id="coQuocHieu" value="1"
+           {{ "checked" if not tmpl or tmpl.co_quoc_hieu }}>
+    <label class="form-check-label" for="coQuocHieu">Có quốc hiệu (CỘNG HÒA XÃ HỘI...)</label>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Vị trí dòng ngày tháng</label>
+    <select name="vi_tri_ngay" class="form-select">
+      <option value="cuoi" {{ "selected" if not tmpl or tmpl.vi_tri_ngay == "cuoi" }}>Cuối trang (trước chữ ký)</option>
+      <option value="dau" {{ "selected" if tmpl and tmpl.vi_tri_ngay == "dau" }}>Đầu trang (dưới tiêu đề)</option>
+    </select>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Nội dung chân trang</label>
+    <select name="kieu_footer" class="form-select">
+      <option value="bang_chu" {{ "selected" if not tmpl or tmpl.kieu_footer == "bang_chu" }}>Thành tiền (bằng chữ)</option>
+      <option value="thanh_toan" {{ "selected" if tmpl and tmpl.kieu_footer == "thanh_toan" }}>Tổng tiền / Thanh toán / Còn lại</option>
+      <option value="khong" {{ "selected" if tmpl and tmpl.kieu_footer == "khong" }}>Không hiện thêm gì</option>
+    </select>
+  </div>
+  <div class="row g-2 mb-3">
+    <div class="col-md-6">
+      <label class="form-label">Nhãn chữ ký bên trái</label>
+      <input type="text" name="nhan_ky_trai" class="form-control" value="{{ tmpl.nhan_ky_trai if tmpl else 'Khách hàng' }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label">Nhãn chữ ký bên phải</label>
+      <input type="text" name="nhan_ky_phai" class="form-control" value="{{ tmpl.nhan_ky_phai if tmpl else 'Người bán hàng' }}">
+    </div>
+  </div>
+  <div class="form-check mb-3">
+    <input class="form-check-input" type="checkbox" name="in_ten_ben_ban_duoi_ky" id="inTen" value="1"
+           {{ "checked" if tmpl and tmpl.in_ten_ben_ban_duoi_ky }}>
+    <label class="form-check-label" for="inTen">In tên cơ sở bán dưới chữ ký bên trái (kiểu phiếu giao hàng)</label>
+  </div>
+
+  <button type="submit" class="btn btn-success">Lưu</button>
+  <a href="{{ url_for('template_list') }}" class="btn btn-outline-secondary">Hủy</a>
+</form>
+{% endblock %}
